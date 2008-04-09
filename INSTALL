@@ -1,0 +1,78 @@
+Copyright (C) 2008  Tadeus Prastowo (eus at member dot fsf dot org)
+
+1. Check out the complete source tree.
+
+2. Add `struct clnphdr clnph' as a new member of union `nh'
+   in `struct sk_buff' defined in
+   `/lib/modules/`uname -r`/build/include/linux/skbuff.h'.
+   
+   struct sk_buff {
+           ...
+           union {
+                   ...
+                   struct clnphdr  clnph;
+           } nh;
+           ...
+   };
+
+3. Copy ``pwd`/include/linux/*.h' and ``pwd`/include/net/*.h' to
+   `/lib/modules/`uname -r`/build/include/linux/' and
+   `/lib/modules/`uname -r`/build/include/net/', respectively.
+
+4. Add `#define AF_ATN 29' and `#define PF_ATN AF_ATN' to
+   `/lib/modules/`uname -r`/build/include/linux/socket.h' and
+   `/usr/include/bits/socket.h', respectively, as follows:
+
+   /lib/modules/`uname -r`/build/include/linux/socket.h:
+   -----------------------------------------------------
+   /* Supported address families. */
+   ...
+   #define AF_WANPIPE      25      /* Wanpipe API Sockets */
+   #define AF_LLC          26      /* Linux LLC                    */
+   #define AF_ATN          29      /* ATN CLNP/TP4 Networking Suite */
+   #define AF_TIPC         30      /* TIPC sockets                 */
+   #define AF_BLUETOOTH    31      /* Bluetooth sockets            */
+   ...
+
+   /* Protocol families, same as address families. */
+   ...
+   #define PF_WANPIPE      AF_WANPIPE
+   #define PF_LLC          AF_LLC
+   #define PF_ATN          AF_ATN
+   #define PF_TIPC         AF_TIPC
+   #define PF_BLUETOOTH    AF_BLUETOOTH
+   ...
+
+   /usr/include/bits/socket.h:
+   ---------------------------
+   /* Protocol families.  */
+   ...
+   #define PF_WANPIPE      25      /* Wanpipe API sockets.  */
+   #define PF_ATN          29      /* ATN CLNP/TP4 Networking Suite */
+   #define PF_BLUETOOTH    31      /* Bluetooth sockets.  */
+   ...
+
+   /* Address families.  */
+   ...
+   #define AF_WANPIPE      PF_WANPIPE
+   #define AF_ATN          PF_ATN
+   #define AF_BLUETOOTH    PF_BLUETOOTH
+   ...
+
+5. Type `make' to build `atn.ko'.
+   Later, type `make clean' to clean up every generated files.
+
+6. Make sure that one of the following modules is either built-in into the
+   kernel or has been inserted as a module into the running kernel:
+   Networking -> Networking options ->
+           ANSI/IEEE 802.2 LLC type 2 Support
+           The IPX protocol
+           Appletalk protocol support
+   Device drivers -> Network device support -> Token Ring devices
+                                                    -> Token Ring driver support
+   because either one of them will enable the invocation of
+   `register_8022_client()' and `unregister_8022_client()' to handle
+   IEEE 802.3 frames.
+
+7. Type `insmod atn.ko' to insert the module.
+   Later, type `rmmod atn' to remove the module.
