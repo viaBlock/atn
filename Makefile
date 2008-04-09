@@ -7,3 +7,4 @@ all:
 
 clean:
 	$(MAKE) -C /lib/modules/$(KVERSION)/build M=$(PWD) clean
+	@rm -f Module.symvers
