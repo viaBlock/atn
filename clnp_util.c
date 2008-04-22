@@ -90,16 +90,6 @@ void clnp_decompose(struct sk_buff *skb, struct clnphdr *clnph)
 	}
 }
 
-__u8 set_flag(__u8 sp, __u8 ms, __u8 er, __u8 type)
-{
-	return sp << 7 | ms << 6 | er << 5 | type;
-}
-
-__u8 clnp_decrease_ttl(struct clnphdr *clnph)
-{
-	return --(clnph->cnf_ttl);
-}
-
 unsigned short merge_chars_to_short(__u8 idx_msb, __u8 idx_lsb)
 {
 	unsigned short len = 0;

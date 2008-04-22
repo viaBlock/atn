@@ -250,7 +250,7 @@ struct clnphdr {
 	__u8 dest_addr[CLNP_ADDR_LEN];
 	__u8 src_len;
 	__u8 src_addr[CLNP_ADDR_LEN];
-};
+} __attribute__ ((packed));
 
 /*
  * In CLNP header, each field begins at the following n-th octet:

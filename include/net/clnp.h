@@ -235,6 +235,14 @@ extern void concatenate(struct sk_buff *skb, struct clnp_frag *cfr);
  */
 
 /**
+ * clnp_hdr - returns the CLNP header part of an skb
+ */
+extern __always_inline struct clnphdr *clnp_hdr(struct sk_buff *skb)
+{
+	return (struct clnphdr *) skb->h.raw;
+}
+
+/**
  * clnp_decompose - assigns the value from skb->nh.raw into clnph
  */
 extern void clnp_decompose(struct sk_buff *skb, struct clnphdr *clnph);
@@ -242,12 +250,18 @@ extern void clnp_decompose(struct sk_buff *skb, struct clnphdr *clnph);
 /**
  * set_flag - returns the value for CLNP header flag field
  */
-extern __always_inline __u8 set_flag(__u8 sp, __u8 ms, __u8 er, __u8 type);
+extern __always_inline __u8 set_flag(__u8 sp, __u8 ms, __u8 er, __u8 type)
+{
+	return sp << 7 | ms << 6 | er << 5 | type;
+}
 
 /**
  * clnp_decrease_ttl - decreases the value of TTL field in CLNP header by one
  */
-extern __always_inline __u8 clnp_decrease_ttl(struct clnphdr *clnph);
+extern __always_inline __u8 clnp_decrease_ttl(struct clnphdr *clnph)
+{
+	return --(clnph->cnf_ttl);
+}
 
 /**
  * merge_chars_to_short - returns unsigned short from two unsigned characters

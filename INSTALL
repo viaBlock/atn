@@ -11,6 +11,7 @@ Copyright (C) 2008  Tadeus Prastowo (eus at member dot fsf dot org)
            union {
                    ...
                    struct clnphdr  *clnph;
+                   unsigned char   *raw;
            } nh;
            ...
    };
@@ -23,8 +24,8 @@ Copyright (C) 2008  Tadeus Prastowo (eus at member dot fsf dot org)
    `/lib/modules/`uname -r`/build/include/linux/socket.h' and
    `/usr/include/bits/socket.h', respectively, as follows:
 
-   /lib/modules/`uname -r`/build/include/linux/socket.h:
-   -----------------------------------------------------
+   For Linux kernel in /lib/modules/`uname -r`/build/include/linux/socket.h:
+   -------------------------------------------------------------------------
    /* Supported address families. */
    ...
    #define AF_WANPIPE      25      /* Wanpipe API Sockets */
@@ -43,8 +44,8 @@ Copyright (C) 2008  Tadeus Prastowo (eus at member dot fsf dot org)
    #define PF_BLUETOOTH    AF_BLUETOOTH
    ...
 
-   /usr/include/bits/socket.h:
-   ---------------------------
+   For GNU C library in /usr/include/bits/socket.h:
+   ------------------------------------------------
    /* Protocol families.  */
    ...
    #define PF_WANPIPE      25      /* Wanpipe API sockets.  */
@@ -59,20 +60,24 @@ Copyright (C) 2008  Tadeus Prastowo (eus at member dot fsf dot org)
    #define AF_BLUETOOTH    PF_BLUETOOTH
    ...
 
-5. Type `make' to build `atn.ko'.
+5. Make sure you are in the directory containing the source code.
+   Type `make' to build `atn.ko'.
    Later, type `make clean' to clean up every generated files.
 
-6. Make sure that one of the following modules is either built-in into the
-   kernel or has been inserted as a module into the running kernel:
-   Networking -> Networking options ->
-           ANSI/IEEE 802.2 LLC type 2 Support
-           The IPX protocol
-           Appletalk protocol support
+6. Make sure that `register_8022_client' and `unregister_8022_client' symbols
+   can be found in your Linux kernel. To do so, type:
+   `cat /proc/kallsyms | grep register_8022_client'. If those two symbols are
+   returned, you can continue to the next step. Otherwise, you have to build one
+   of the following Linux kernel components either as a module or built-in into
+   the kernel. If it has already been built as a module, make sure that it has
+   been inserted into the running kernel with either `modprobe' or `insmod':
+   Networking -> Networking options -> 802.1d Ethernet Bridging
+   Networking -> Networking options -> ANSI/IEEE 802.2 LLC type 2 Support
+   Networking -> Networking options -> The IPX protocol
+   Networking -> Networking options -> Appletalk protocol support
    Device drivers -> Network device support -> Token Ring devices
                                                     -> Token Ring driver support
-   because either one of them will enable the invocation of
-   `register_8022_client()' and `unregister_8022_client()' to handle
-   IEEE 802.3 frames.
 
-7. Type `insmod atn.ko' to insert the module.
+7. Make sure you are in the directory containing the source code.
+   Type `insmod atn.ko' to insert the module.
    Later, type `rmmod atn' to remove the module.

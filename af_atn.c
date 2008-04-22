@@ -11,22 +11,27 @@
  *		Tadeus Prastowo <eus@member.fsf.org>
  *
  * Changes (oldest at the top, newest at the bottom):
- *		Husni Fahmi:	2007/08/04:
- *				Register IP packet handler
- *				Define IP packet type in af_inet.c
- *				Call dev_add_pack() for registering IP packet
+ *		Husni Fahmi:	- 2007/08/04:
+ *				* Register IP packet handler
+ *				* Define IP packet type in af_inet.c
+ *				* Call dev_add_pack() for registering IP packet
  *				handler (dev_add_pack() is defined in
  *				net/core/dev.c)
- *		Tadeus:		2008/03/24:
- *				Replace the use of dev_add_pack() with
+ *		Tadeus:		- 2008/03/24:
+ *				* Replace the use of dev_add_pack() with
  *				register_8022_client() to handle IEEE 802.3
  *				frame
- *				2008/04/07:
- *				Create a new type of BSD socket whose
+ *				- 2008/04/07:
+ *				* Create a new type of BSD socket whose
  *				communication domain is PF_ATN, communication
  *				semantic is SOCK_RAW, and communication protocol
  *				is zero to enable the delivery of the payload of
  *				a CLNP datagram to a user-space program
+ *				- 2008/04/15:
+ *				* Complete the initial model of the receiving
+ *				mechanism of the socket
+ *				* Working on the initial model of the sending
+ *				mechanism of the socket
  *
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
@@ -35,6 +40,7 @@
  */
 
 #include <asm/errno.h>
+#include <asm/types.h>
 #include <linux/atn.h>
 #include <linux/clnp.h>
 #include <linux/ctype.h>
@@ -45,6 +51,8 @@
 #include <linux/net.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
+#include <linux/string.h>
+#include <linux/byteorder/generic.h>
 #include <net/clnp.h>
 #include <net/datalink.h>
 #include <net/p8022.h>
@@ -56,9 +64,12 @@ MODULE_DESCRIPTION("ATN protocol stack for Linux");
 MODULE_SUPPORTED_DEVICE("netdevice");
 
 /* Private Function Prototypes */
+static __always_inline struct atn_sock *atn_sk(struct sock *sk)
+{
+	return (struct atn_sock *)sk;
+}
 static int atn_rcv(struct sk_buff *skb, struct net_device *dev
 			 , struct packet_type *pt, struct net_device *orig_dev);
-static inline struct atn_sock *atn_sk(struct sock *sk);
 static int atn_create(struct socket *sock, int protocol);
 static int atn_release(struct socket *sock);
 static int atn_recvmsg(struct kiocb *iocb, struct socket *sock
@@ -92,18 +103,19 @@ static struct proto_ops atn_sockraw_ops = {
 	, .shutdown = sock_no_shutdown
 	, .setsockopt = sock_no_setsockopt
 	, .getsockopt = sock_no_getsockopt
-	, .sendmsg = sock_no_sendmsg
 	, .mmap = sock_no_mmap
+	, .sendmsg = sock_no_sendmsg
 	, .sendpage = sock_no_sendpage
 };
 static struct datalink_proto *p8022_datalink = NULL;
 static unsigned char atn_8022_type = 0xFE; /* ISO Network Layer */
 static char atn_llc_err_msg[] __initdata =
 			       KERN_CRIT "ATN: Unable to register with 802.2\n";
+static struct sock *sk = NULL; /* dirty hack! Use link list of sks instead */
 
 static int __init init_atn(void)
 {
-	printk(KERN_ALERT __FILE__": init_atn()\n");
+	printk(KERN_INFO __FILE__": init_atn()\n");
 
 	proto_register(&atn_proto, 1);
 	sock_register(&atn_family_ops);
@@ -120,7 +132,7 @@ module_init(init_atn);
 
 static void __exit cleanup_atn(void)
 {
-	printk(KERN_ALERT __FILE__": cleanup_atn()\n");
+	printk(KERN_INFO __FILE__": cleanup_atn()\n");
 
 	if (p8022_datalink) {
 		unregister_8022_client(p8022_datalink);
@@ -136,9 +148,6 @@ static int atn_rcv(struct sk_buff *skb, struct net_device *dev
 			  , struct packet_type *pt, struct net_device *orig_dev)
 {
 	int rc = 0;
-	int i = 0;
-	int j = 0;
-	int len = 0;
 
 	if (skb->pkt_type == PACKET_OTHERHOST) {
 		goto drop;
@@ -148,72 +157,20 @@ static int atn_rcv(struct sk_buff *skb, struct net_device *dev
 		goto out;
 	}
 
-	printk(KERN_ALERT "len: %u\ndata_len: %u\nmac_len: %u\n", skb->len
-						 , skb->data_len, skb->mac_len);
-	printk(KERN_INFO "Printing 32 skb->mac.raw[i]:\n");
-	len = 32;
-	for (i = 0; i < len; i += 16) {
-		for (j = 0; j < 16 && i + j < len; j++) {
-			printk("%02X%s", skb->mac.raw[i + j]
-							, (j != 15) ? " " : "");
-		}
-		while (j < 16) {
-			printk("  %s", (j != 15) ? " " : "");
-			++j;
-		}
-		printk(": ");
-		for (j = 0; j < 16 && i + j < len; j++) {
-			if (isprint (skb->mac.raw[i + j])) {
-				printk("%c", skb->mac.raw[i + j]);
-			} else {
-				printk(".");
-			}
-		}
-		printk("\n");
+	if (!pskb_may_pull(skb, sizeof(struct clnphdr))) {
+		goto drop;
 	}
 
-	printk(KERN_INFO "Printing 32 skb->nh.raw[i]:\n");
-	len = 32;
-	for (i = 0; i < len; i += 16) {
-		for (j = 0; j < 16 && i + j < len; j++) {
-			printk("%02X%s", skb->nh.raw[i + j]
-							, (j != 15) ? " " : "");
-		}
-		while (j < 16) {
-			printk("  %s", (j != 15) ? " " : "");
-			++j;
-		}
-		printk(": ");
-		for (j = 0; j < 16 && i + j < len; j++) {
-			if (isprint (skb->nh.raw[i + j])) {
-				printk("%c", skb->nh.raw[i + j]);
-			} else {
-				printk(".");
-			}
-		}
-		printk("\n");
+	if (!pskb_may_pull(skb, clnp_hdr(skb)->cnf_hdr_len)) {
+		goto drop;
 	}
 
-	printk(KERN_INFO "Printing 32 skb->h.raw[i]:\n");
-	len = 32;
-	for (i = 0; i < len; i += 16) {
-		for (j = 0; j < 16 && i + j < len; j++) {
-			printk("%02X%s", skb->h.raw[i + j]
-							, (j != 15) ? " " : "");
-		}
-		while (j < 16) {
-			printk("  %s", (j != 15) ? " " : "");
-			++j;
-		}
-		printk(": ");
-		for (j = 0; j < 16 && i + j < len; j++) {
-			if (isprint (skb->h.raw[i + j])) {
-				printk("%c", skb->h.raw[i + j]);
-			} else {
-				printk(".");
-			}
-		}
-		printk("\n");
+	if (sk == NULL) {
+		goto drop;
+	}
+
+	if ((rc = sock_queue_rcv_skb(sk, skb)) < 0) {
+		goto drop;
 	}
 
 drop:
@@ -246,14 +203,9 @@ void get_nsap_addr(__u8 *addr)
 	addr[19] = 0x00;
 }
 
-static inline struct atn_sock *atn_sk(struct sock *sk)
-{
-	return (struct atn_sock *)sk;
-}
-
 static int atn_create(struct socket *sock, int protocol)
 {
-	struct sock *sk = NULL;
+	/* struct sock *sk = NULL; uncomment after dirty hack is removed */
 
 	if (sock->type != SOCK_RAW) {
 		return -ESOCKTNOSUPPORT;
@@ -270,7 +222,7 @@ static int atn_create(struct socket *sock, int protocol)
 
 	sock_init_data(sock, sk);
 	sock->ops = &atn_sockraw_ops;
-	printk("Socket created");
+	sock_reset_flag(sk, SOCK_ZAPPED);
 
 	return 0;
 }
@@ -294,5 +246,53 @@ static int atn_release(struct socket *sock)
 static int atn_recvmsg(struct kiocb *iocb, struct socket *sock
 				   , struct msghdr *msg, size_t size, int flags)
 {
-	return 0;
+	struct sock *sk = sock->sk;
+	struct sockaddr_atn *satn = (struct sockaddr_atn *) msg->msg_name;
+	struct clnphdr *clnph = NULL;
+	struct sk_buff *skb;
+	int copied;
+	int rc;
+
+	rc = -ENOTCONN;
+	if (sock_flag(sk, SOCK_ZAPPED)) {
+		goto out;
+	}
+
+	skb = skb_recv_datagram(sk, flags & ~MSG_DONTWAIT, flags & MSG_DONTWAIT
+									 , &rc);
+	if (!skb) {
+		goto out;
+	}
+
+	clnph = clnp_hdr(skb);
+	copied = -clnph->cnf_hdr_len;
+	copied -= clnph->cnf_flag & CNF_SP ? 6 : 0;
+	copied += ntohs(clnph->cnf_seglen);
+	if (copied > size) {
+		copied = size;
+		msg->msg_flags |= MSG_TRUNC;
+	}
+
+	rc = skb_copy_datagram_iovec(skb, clnph->cnf_hdr_len, msg->msg_iov
+								      , copied);
+	if (rc) {
+		goto out_free;
+	}
+	if (skb->tstamp.off_sec) {
+		skb_get_timestamp(skb, &sk->sk_stamp);
+	}
+
+	msg->msg_namelen = sizeof(*satn);
+
+	if (satn) {
+		satn->satn_family = AF_ATN;
+		memcpy(&satn->satn_addr.s_addr, clnph->src_addr, clnph->src_len)
+									       ;
+	}
+	rc = copied;
+
+out_free:
+	skb_free_datagram(sk, skb);
+out:
+	return rc;
 }
