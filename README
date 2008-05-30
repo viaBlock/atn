@@ -1,4 +1,4 @@
-	THE ATN CLNP/TP4 NETWORKING SUITE FOR LINUX KERNEL 2.6.xx
+	THE ATN TP4/CLNP NETWORKING SUITE FOR LINUX KERNEL 2.6.xx
 
 This file explains what this project is all about.
 							-- Tadeus Prastowo
@@ -24,20 +24,20 @@ WHAT IS ATN?
   and technology in the field of air navigation for the development of air
   navigation for international civil aviation over a period of 25 years.
 
-WHAT IS CLNP/TP4?
+WHAT IS TP4/CLNP?
 
   CLNP stands for connectionless network protocol, whereas TP4 stands for
-  transport protocol type 4. They are networking protocols defined respectively
-  in the network layer and the transport layer of the Open Systems
-  Interconnection (OSI) framework of the International Organization for
-  Standardization (ISO). As an analogy to the Internet networking protocol
-  suite, CLNP is just like IP, whereas TP4 is just like TCP and UDP (TP4 defines
-  CLTP, which stands for connectionless transport protocol, and COTP, which
-  stands for connection-oriented transport protocol). They are used as the
+  transport protocol type 4, which is a connection-oriented transport protocol.
+  They are networking protocols defined respectively in the network layer and
+  the transport layer of the Open Systems Interconnection (OSI) framework of
+  the International Organization for Standardization (ISO). CLNP is
+  standardized in ISO/IEC 8473-1, whereas COTP (TP4) is standardized in
+  ISO/IEC 8073. As an analogy to the Internet networking protocol suite,
+  CLNP is just like IP, whereas TP4 is just like TCP. They are used as the
   communication protocols in the digital data communication systems of the ATN
   because the ATN follows the ISO OSI standards.
 
-WHY CLNP/TP4 INSTEAD OF IP/TCP?
+WHY TP4/CLNP INSTEAD OF TCP/IP?
 
   Because the ICAO requires the use of communication protocols based on the ISO
   OSI standards in the ATN as stated in Annex X to the Convention on
@@ -53,7 +53,7 @@ WHY CLNP/TP4 INSTEAD OF IP/TCP?
 
 WHAT IS THE OBJECTIVE OF THIS PROJECT?
 
-  To provide the implementation of the ATN CLNP/TP4 Networking Suite for the
+  To provide the implementation of the ATN TP4/CLNP Networking Suite for the
   Linux kernel in the spirit of the free software movement so that you are free
   to:
   - run the program for any purpose (freedom 0)
@@ -65,7 +65,7 @@ WHAT IS THE OBJECTIVE OF THIS PROJECT?
 WHAT DOCUMENTS ARE RELEVANT TO THE IMPLEMENTATION OF THIS NETWORKING SUITE?
 
   The following documents are of concern to the implementation of the ATN
-  CLNP/TP4 Networking Suite:
+  TP4/CLNP Networking Suite:
   - the ICAO manual of technical provisions for the ATN (Doc 9705)
   - the ISO standard documents related to OSI
 
@@ -77,6 +77,11 @@ WHAT DOCUMENTS ARE RELEVANT TO THE IMPLEMENTATION OF THIS NETWORKING SUITE?
 ON WHAT LINUX KERNEL VERSION DOES THIS NETWORKING SUITE RUN?
 
   This networking suite runs on Linux kernel version 2.6.xx.
+
+WHO INITIATED AND FUNDED THIS PROJECT?
+
+  This project was initated and funded by The Agency for the Assessment and
+  Application of Technology (BPPT) [http://bppt.go.id]
 
 REFERENCES:
 

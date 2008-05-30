@@ -1,10 +1,14 @@
-.PHONY: all clean
+.PHONY: modules modules_install clean
 
 KVERSION := $(shell uname -r)
+KERNEL_SRC := /lib/modules/$(KVERSION)/build
 
-all:
-	$(MAKE) -C /lib/modules/$(KVERSION)/build M=$(PWD) modules
+modules:
+	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) modules
+
+modules_install:
+	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) modules_install
 
 clean:
-	$(MAKE) -C /lib/modules/$(KVERSION)/build M=$(PWD) clean
-	@rm -f Module.symvers
+	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) clean
+	@rm -f Module.symvers *.o .*.cmd *.mod.c *.ko

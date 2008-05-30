@@ -5,19 +5,56 @@
  *
  * Authors:	Bunga Sugiarto <bunga.sugiarto@student.sgu.ac.id>
  *		Husni Fahmi <fahmi@inn.bppt.go.id>
+ *		Tadeus Prastowo <eus@member.fsf.org>
  *
  * Changes (oldest at the top, newest at the bottom):
- *		Tadeus:		2008/04/06:
- *				Replace all invocation of masking() with
+ *		Tadeus:		- 2008/04/06:
+ *				* Replace all invocation of masking() with
  *				(& CNF_*)
+ *				- 2008/04/13:
+ *				* Replace all instances of `nh' that is used to
+ *				get the CLNP header part with clnp_hdr()
+ *				* Replace dev_alloc_skb() with alloc_skb() to
+ *				have the correct semantic as it is written in
+ *				Linux Network Internals in section 2.1.5.1.
+ *				Allocating memory: alloc_skb and dev_alloc_skb:
+ *				"dev_alloc_skb is the buffer allocation function
+ *				meant for use by device drivers and expected to
+ *				be executed in interrupt mode."
+ *				- 2008/04/14:
+ *				* Replace merge_chars_to_short() with
+ *				ntohs(clnph->seglen)
+ *				* Replace the following construct
+ *				#if defined(__BIG_ENDIAN_BITFIELD)
+ *				...
+ *				#elif defined(__LITTLE_ENDIAN_BITFIELD)
+ *				...
+ *				#else
+ *				...
+ *				#endif
+ *				with the equivalent htons()
+ *				- 2008/04/19:
+ *				* malloc() for cfl in clnp_new_pkt() was not
+ *				checked for failure (check added)
+ *				- 2008/04/26:
+ *				* Replace the custom queue linked-list structure
+ *				with the Linux linked-list structure
+ *				(linux/list.h)
+ *
+ * Todo:
+ *		Tadeus:		- 2008/04/06:
+ *				* In clnp_new_pkt()
+ *				* In clnp_comp_frag()
  *
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
+ *		as published by the Free Software Foundation; either version 2
+ *		of the License, or (at your option) any later version.
  */
 
+#include <asm/bug.h>
 #include <asm/types.h>
+#include <linux/byteorder/generic.h>
 #include <linux/clnp.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
@@ -27,12 +64,12 @@
 #include <linux/timer.h>
 #include <net/clnp.h>
 
-/* clnp_fragl_nqueues holds the number of fragment lists currently maintained
-						 in the linked list structure */
-static int clnp_fragl_nqueues = 0;
+/* Private Function Prototypes */
+static struct clnp_fragl *clnp_new_pkt(struct sk_buff *skb);
+static struct clnp_fragl *clnp_find(struct sk_buff *skb);
 
-/* clnp_frags holds the last fragment list in the queue */
-static struct clnp_fragl *clnp_frags = NULL;
+/* clnpq is the queue of fragment lists */
+static HLIST_HEAD(clnpq);
 
 void clnp_frag_destroy(struct clnp_fragl *cfh)
 {
@@ -45,11 +82,11 @@ void clnp_frag_destroy(struct clnp_fragl *cfh)
 	/* remove cfh from the list of fragmented PDUs */
 	printk(KERN_INFO "Unlink the fragment list from the queue\n");
 	if (clnp_frags == cfh) {
-		clnp_frags = cfh->cfl_next;
+		clnp_frags = cfh->next;
 	} else {
-		for (scan = clnp_frags; scan != NULL; scan = scan->cfl_next) {
-			if (scan->cfl_next == cfh) {
-				scan->cfl_next = cfh->cfl_next;
+		for (scan = clnp_frags; scan != NULL; scan = scan->next) {
+			if (scan->next == cfh) {
+				scan->next = cfh->next;
 				break;
 			}
 		}
@@ -58,7 +95,7 @@ void clnp_frag_destroy(struct clnp_fragl *cfh)
 
 	frag_p = cfh->cfl_frags;
 	while (frag_p != NULL) {
-		next_p = frag_p->cfr_next;
+		next_p = frag_p->next;
 		kfree(frag_p);
 		frag_p = next_p;
 	}
@@ -84,68 +121,51 @@ void clnp_frag_expires(unsigned long data)
 		return;
 	}
 
-	if (first_frag->cfr_first == 0) {
-		clnp_emit_er(expired->cfl_orihdr, GEN_INCOMPLETE);
-	}
+	clnp_discard(expired->cfl_orihdr, TTL_EXPREASS);
 
 	clnp_frag_destroy(expired);
 }
 
 void concatenate(struct sk_buff *skb, struct clnp_frag *cfr)
 {
-	unsigned int fraglen = cfr->cfr_last - cfr->cfr_first + 1;
-	unsigned short seg_len = 0;
-	__u8 *temp_seglen = NULL;
+	struct clnphdr *clnph = clnp_hdr(skb);
+	unsigned int fraglen = cfr->last - cfr->first + 1;
 
 	memcpy(skb->data, cfr->data, fraglen);
 	skb->data += fraglen - 1;
 
-	seg_len = merge_chars_to_short(skb->nh.raw[IDX_SEGLEN_MSB]
-		      , skb->nh.raw[IDX_SEGLEN_LSB]) + (unsigned short) fraglen;
-	temp_seglen = (unsigned char *) &seg_len;
-#if defined(__LITTLE_ENDIAN_BITFIELD)
-	skb->nh.raw[IDX_SEGLEN_MSB] = temp_seglen[1];
-	skb->nh.raw[IDX_SEGLEN_LSB] = temp_seglen[0];
-#elif defined(__BIG_ENDIAN_BITFIELD)
-	skb->nh.raw[IDX_SEGLEN_MSB] = temp_seglen[0];
-	skb->nh.raw[IDX_SEGLEN_LSB] = temp_seglen[1];
-#else
-#error Only handle little and big endian byte-orders
-#endif
+	clnph->seglen = htons(ntohs(clnph->seglen)
+						    + (unsigned short) fraglen);
 }
 
-int compare_addr(__u8 *addr1, __u8 *addr2)
+/*
+ * clnp_find - finds the corresponding fragment list of a given @skb
+ *
+ * The search criteria are based on:
+ * (1) the identifier found in the segmentation part of the CLNP header,
+ * (2) the source address, and
+ * (3) the destination address.
+ * Linear search is used. It has not been optimized yet. Maybe later it can be
+ * improved by using hash algorithm, or even rb-tree maybe?
+ */
+static struct clnp_fragl *clnp_find(struct sk_buff *skb)
 {
-	int counter = 0;
-	int indicator = 0;
+	struct clnphdr *clnph = clnp_hdr(skb);
+	struct clnp_fragl *node = NULL;
 
-	for (counter = 0; counter < 20; counter++) {
-		if (addr1[counter] != addr2[counter]) {
-			indicator = 1;
-			break;
-		}
+	list_for_each_entry(node, clnp_frags, next) {
+		if (node->id == ntohs(clnph->next_part->id) && memcmp(node->)
 	}
 
-	if (indicator == 0) {
-		return 1;
-	} else {
-		return 0;
-	}
-}
-
-struct clnp_fragl *clnp_find(__u8 *dest, __u8 *src, struct clnp_segment *seg)
-{
-	struct clnp_fragl *cfh = NULL;
-
-	printk(KERN_INFO "Entering clnp_find()\n");
 	cfh = clnp_frags;
 	while (cfh != NULL) {
-		if ((cfh->id == seg->cng_id) && compare_addr(cfh->dstaddr, dest)
+		if ((cfh->id == ntohs(seg->id))
+					   && compare_addr(cfh->dstaddr, dest)
 					   && compare_addr(cfh->srcaddr, src)) {
 			printk(KERN_INFO "Fragment is found.\n");
 			return cfh;
 		} else {
-			cfh = cfh->cfl_next;
+			cfh = cfh->next;
 		}
 	}
 
@@ -153,54 +173,55 @@ struct clnp_fragl *clnp_find(__u8 *dest, __u8 *src, struct clnp_segment *seg)
 	return NULL;
 }
 
-struct clnp_fragl *clnp_new_pkt(struct sk_buff *skb, __u8 *dest, __u8 *src
-						     , struct clnp_segment *seg)
+/*
+ * clnp_new_pkt - creates a new fragment list (struct clnp_fragl)
+ */
+static struct clnp_fragl *clnp_new_pkt(struct sk_buff *skb)
 {
+	struct clnphdr *clnph = clnp_hdr(skb);
 	struct clnp_fragl *cfl = NULL;
+	struct clnphdr *orig_clnph = NULL;
 
-	printk(KERN_INFO "Entering clnp_new_pkt()\n");
-	if(clnp_fragl_nqueues == CLNP_MAX_Q) {
-		printk(KERN_INFO "Queue is full, cannot create a new fragment"
-								     " list\n");
-		clnp_discard(skb, REASS_INTERFERE);
+	if(skb) {
+		cfl = (struct clnp_fragl *) kmalloc(sizeof(struct clnp_fragl)
+								  , GFP_ATOMIC);
+		if (!cfl) {
+			return NULL;
+		}
+		cfl->cfl_orihdr = alloc_skb(sizeof(struct sk_buff)
+								, GFP_ATOMIC);
+		orig_clnph = clnp_hdr(cfl->cfl_orihdr);
+		orig_clnph = (unsigned char *) kmalloc(
+				sizeof(unsigned char) * clnph->hdrlen
+								, GFP_KERNEL);
+		memcpy(&orig_clnph->nlpid, &clnph->nlpid
+							, clnph->hdrlen);
+
+		cfl->id = ntohs(seg->id);
+		printk(KERN_INFO "cfl->id: 0x%02X\n",cfl->id);
+
+		memcpy(cfl->dstaddr, clnph->dest_addr, NSAP_ADDR_LEN);
+		memcpy(cfl->srcaddr, clnph->src_addr, NSAP_ADDR_LEN);
+
+		cfl->ttl = clnph->ttl;
+		cfl->last = ntohs(seg->tot_len) - clnph->hdrlen - 1
+									       ;
+		cfl->cfl_frags = NULL;
+		cfl->next = clnp_frags;
+		clnp_frags = cfl;
+		clnp_fragl_nqueues++;
+
+		init_timer(&cfl->timer);
+		cfl->timer.expires = jiffies + CLNP_FRAG_TIME;
+		cfl->timer.data = (unsigned long) cfl;
+		cfl->timer.function = clnp_frag_expires;
+		add_timer(&cfl->timer);
+		return cfl;
 	} else {
-		if(skb) {
-			cfl = (struct clnp_fragl *) kmalloc(
-					 sizeof(struct clnp_fragl), GFP_KERNEL);
-			cfl->cfl_orihdr = dev_alloc_skb(sizeof(struct sk_buff));
-			cfl->cfl_orihdr->nh.raw = (unsigned char *) kmalloc(
-				sizeof(unsigned char) * skb->nh.raw[IDX_HDR_LEN]
-								  , GFP_KERNEL);
-			memcpy(&cfl->cfl_orihdr->nh.raw[IDX_PROTO_ID]
-						    , &skb->nh.raw[IDX_PROTO_ID]
-						    , skb->nh.raw[IDX_HDR_LEN]);
-
-			cfl->id = seg->cng_id;
-			printk(KERN_INFO "cfl->id: %02X\n",cfl->id);
-
-			memcpy(cfl->dstaddr, &skb->nh.raw[IDX_DEST_ADDR], 20);
-			memcpy(cfl->srcaddr, &skb->nh.raw[IDX_SRC_ADDR], 20);
-
-			cfl->cfl_ttl = skb->nh.raw[IDX_TTL];
-			cfl->cfl_last = seg->cng_tot_len
-						 - skb->nh.raw[IDX_HDR_LEN] - 1;
-			cfl->cfl_frags = NULL;
-			cfl->cfl_next = clnp_frags;
-			clnp_frags = cfl;
-			clnp_fragl_nqueues++;
-
-			init_timer(&cfl->timer);
-			cfl->timer.expires = jiffies + CLNP_FRAG_TIME;
-			cfl->timer.data = (unsigned long) cfl;
-			cfl->timer.function = clnp_frag_expires;
-			add_timer(&cfl->timer);
-			return cfl;
-		} else {
-			clnp_discard(skb, GEN_INCOMPLETE);
-  		}
+		clnp_discard(skb, GEN_INCOMPLETE);
 	}
 
-	return 0;
+	return NULL;
 }
 
 void clnp_insert_frag(struct clnp_fragl *cfl, struct sk_buff *skb
@@ -215,18 +236,17 @@ void clnp_insert_frag(struct clnp_fragl *cfl, struct sk_buff *skb
 	unsigned short hdrlen = 0;
 	unsigned short start = 0;
 	unsigned short overlap = 0;
+	struct clnphdr *clnph = clnp_hdr(skb);
 
 	printk(KERN_INFO "Entering clnp_insert_frag()\n");
 
-	first = seg->cng_off;
-	fraglen = merge_chars_to_short(skb->nh.raw[IDX_SEGLEN_MSB]
-						  , skb->nh.raw[IDX_SEGLEN_LSB])
-				    - (unsigned short) skb->nh.raw[IDX_HDR_LEN];
+	first = ntohs(seg->off);
+	fraglen = ntohs(clnph->seglen) - clnph->hdrlen;
 	last = first + fraglen - 1;
 
 	/* if it is not the last fragment and the fragment is not modulus 8,
 					 we shave the fragment into modulus 8 */
-	if (skb->nh.clnph->cnf_flag & CNF_MS) {
+	if (clnph->flag & MS_MASK) {
 		if ((last + 1) % 8 != 0) {
 			printk(KERN_INFO "The fragment is not modulus 8\n");
 			printk(KERN_INFO "Before the fragment is shaved, last"
@@ -237,133 +257,130 @@ void clnp_insert_frag(struct clnp_fragl *cfl, struct sk_buff *skb
 		}
 	}
 
-	if (cfl->cfl_frags != NULL) {
-		cf = cfl->cfl_frags;
-		while (cf != NULL) {
-			if (cf->cfr_first >= first) {
-				cf_post = cf;
-				break;
-			}
-			cf_pre = cf;
-			cf = cf->cfr_next;
-		}
+	BUG_ON(!cfl->cfl_frags);
 
-		if (cf_pre != NULL) {
-			if (cf_pre->cfr_last >= first) {
-				overlap = cf_pre->cfr_last - first + 1;
-				printk(KERN_INFO "Fraglen: %d\n", fraglen);
-				if (overlap >= fraglen) {
-					printk(KERN_INFO "All part of the new"
-						 " received segment is included"
-						     " in the previous adjacent"
-								  " segment\n");
-					kfree_skb(skb);
-					return;
-				} else {
-					printk(KERN_INFO "Only partial part of"
-						     " the new received segment"
-						   " overlaps with the previous"
-							 " adjacent segment\n");
-					printk(KERN_INFO "Overlap with previous"
-					       " fragment: %d bytes\n",overlap);
-					first += overlap;
-				}
+	cf = cfl->cfl_frags;
+	while (cf != NULL) {
+		if (cf->first >= first) {
+			cf_post = cf;
+			break;
+		}
+		cf_pre = cf;
+		cf = cf->next;
+	}
+
+	if (cf_pre != NULL) {
+		if (cf_pre->last >= first) {
+			overlap = cf_pre->last - first + 1;
+			printk(KERN_INFO "Fraglen: %d\n", fraglen);
+			if (overlap >= fraglen) {
+				printk(KERN_INFO "All part of the new"
+						" received segment is included"
+						" in the previous adjacent"
+								" segment\n");
+				kfree_skb(skb);
+				return;
+			} else {
+				printk(KERN_INFO "Only partial part of"
+						" the new received segment"
+						" overlaps with the previous"
+							" adjacent segment\n");
+				printk(KERN_INFO "Overlap with previous"
+					" fragment: %d bytes\n",overlap);
+				first += overlap;
 			}
 		}
-		printk(KERN_INFO "Test\n");
-		for (cf = cf_post; cf != NULL; cf = cf->cfr_next) {
-			if (cf->cfr_first <= last) {
-				unsigned short overlap = last - cf->cfr_first
-									    + 1;
-				printk(KERN_INFO "Fraglen: %d\n", fraglen);
-				if (overlap >= fraglen) {
-					printk(KERN_INFO "All part of the new"
-						 " received segment is included"
-							 " in the next adjacent"
-								  " segment\n");
-					kfree_skb(skb);
-					return;
-				} else {
-					printk(KERN_INFO "Only partial part of"
-						     " the new received segment"
-						       " overlaps with the next"
-							 " adjacent segment\n");
-					printk(KERN_INFO "Overlap with next"
-					      " fragment: %d bytes\n", overlap);
-					last -= overlap;
-				}
+	}
+
+	for (cf = cf_post; cf != NULL; cf = cf->next) {
+		if (cf->first <= last) {
+			unsigned short overlap = last - cf->first
+									+ 1;
+			printk(KERN_INFO "Fraglen: %d\n", fraglen);
+			if (overlap >= fraglen) {
+				printk(KERN_INFO "All part of the new"
+						" received segment is included"
+							" in the next adjacent"
+								" segment\n");
+				kfree_skb(skb);
+				return;
+			} else {
+				printk(KERN_INFO "Only partial part of"
+						" the new received segment"
+						" overlaps with the next"
+							" adjacent segment\n");
+				printk(KERN_INFO "Overlap with next"
+					" fragment: %d bytes\n", overlap);
+				last -= overlap;
 			}
 		}
 	}
 
 	/* Insert the new fragment between cf_pre & cf_post */
 	cf = (struct clnp_frag *) kmalloc(sizeof(struct clnp_frag), GFP_KERNEL);
-	hdrlen = (unsigned short) skb->nh.raw[IDX_HDR_LEN];
+	hdrlen = (unsigned short) clnph->hdrlen;
 	cf->data = (unsigned char *) kmalloc(sizeof(unsigned char)
 					      * (last - first + 1), GFP_KERNEL);
 	start = hdrlen + overlap;
-	memcpy(cf->data, &skb->nh.raw[start], last - first + 1);
+	memcpy(cf->data, clnph + start, last - first + 1);
 
-	cf->cfr_first = first;
-	cf->cfr_last = last;
-	if (last > cfl->cfl_last) {
-		cfl->cfl_last = last;
+	cf->first = first;
+	cf->last = last;
+	if (last > cfl->last) {
+		cfl->last = last;
 	}
-	cf->cfr_next = cf_post;
+	cf->next = cf_post;
 	if (cf_pre == NULL) {
 		cfl->cfl_frags = cf;
 	} else {
-		cf_pre->cfr_next = cf;
+		cf_pre->next = cf;
 	}
 }
 
 struct sk_buff *clnp_comp_frag(struct clnp_fragl *cfh, unsigned short totlen)
 {
-	struct sk_buff *complete_skb = dev_alloc_skb(sizeof(struct sk_buff));
+	struct clnphdr *orihdr_clnph = clnp_hdr(cfh->cfl_orihdr);
+	unsigned short hdrlen = orihdr_clnph->hdrlen;
+	struct sk_buff *complete_skb = NULL;
+	struct clnphdr *complete_clnph = NULL;
 	struct clnp_frag *cf = cfh->cfl_frags;
-	unsigned short hdr_len
-			= (unsigned short) cfh->cfl_orihdr->nh.raw[IDX_HDR_LEN];
-	__u8 *temp_seglen = (unsigned char *) &hdr_len;
-	int start_offset = cf->cfr_first;
+	int start_offset = cf->first;
 	int last_offset = 0;
 
-	printk(KERN_INFO "Entering clnp_comp_frag()\n");
-	complete_skb->data = (unsigned char *) kmalloc(sizeof(unsigned char)
-						  * (totlen + 100), GFP_KERNEL);
-	complete_skb->nh.clnph = (struct clnphdr *) complete_skb->data;
-	memcpy(complete_skb->data, &cfh->cfl_orihdr->nh.raw[IDX_PROTO_ID]
-								     , hdr_len);
-	complete_skb->data += hdr_len;
+	/* Still under construction by Tadeus Prastowo:
+	complete_skb = alloc_skb(totlen + headroom_size(), GFP_ATOMIC);
+	skb_reserve(complete_skb, headroom_size());
+			 |
+			 +--> dev->hard_header_len + datalink->header_len
+			      |
+			      +--> need to get the device first (routing?)
+	complete_clnph = (struct clnph *) skb_put(totlen);
+	*/
 
-#if defined(__LITTLE_ENDIAN_BITFIELD)
-	complete_skb->nh.raw[IDX_SEGLEN_MSB] = temp_seglen[1];
-	complete_skb->nh.raw[IDX_SEGLEN_LSB] = temp_seglen[0];
-#elif defined(__BIG_ENDIAN_BITFIELD)
-	complete_skb->nh.raw[IDX_SEGLEN_MSB] = temp_seglen[0];
-	complete_skb->nh.raw[IDX_SEGLEN_LSB] = temp_seglen[1];
-#else
-#error Only handle little and big endian byte-orders
-#endif
+	memcpy(complete_skb->data, orihdr_clnph, hdrlen);
+	complete_skb->data += hdrlen;
+
+	complete_clnph->seglen = htons(hdrlen);
 
 	while (cf != NULL) {
-		struct clnp_frag *cf_next = cf->cfr_next;
+		struct clnp_frag *cf_next = cf->next;
 
 		if (cf_next == NULL) {
-			if (cf->cfr_first == (last_offset + 1)) {
-				last_offset = cf->cfr_last;
+			if (cf->first == (last_offset + 1)) {
+				last_offset = cf->last;
 				concatenate(complete_skb, cf);
 			}
 		} else {
-			if ((cf->cfr_last == (cf_next->cfr_first - 1))
+			if ((cf->last == (cf_next->first - 1))
 							  && (cf_next!= NULL)) {
-				last_offset = cf->cfr_last;
+				last_offset = cf->last;
 				concatenate(complete_skb, cf);
 			}
 		}
-		cf = cf->cfr_next;
+		cf = cf->next;
 	}
 
-	if ((start_offset == 0) && (last_offset == cfh->cfl_last)) {
+	if ((start_offset == 0) && (last_offset == cfh->last)) {
 		cfh->complete = 1; /* set complete indicator to true */
 		printk(KERN_INFO "All fragments have been received\n");
 		printk(KERN_INFO "The complete reassembled data:\n");
@@ -374,42 +391,30 @@ struct sk_buff *clnp_comp_frag(struct clnp_fragl *cfh, unsigned short totlen)
 	}
 
 	printk(KERN_INFO "Fragments are not complete\n");
-	kfree(complete_skb->nh.clnph);
+	kfree(complete_clnph);
 	kfree_skb(complete_skb);
 	return NULL;
 }
 
-struct sk_buff *clnp_defrag(struct sk_buff *skb, __u8 *dest, __u8 *src
-						     , struct clnp_segment *seg)
+struct sk_buff *clnp_defrag(struct sk_buff *skb)
 {
 	struct clnp_fragl *cfh = NULL;
 
-	printk(KERN_INFO "Entering clnp_defrag()\n");
-
-	if (clnp_frags == NULL) {
-		printk(KERN_INFO "Currently there is no fragment list inside"
-				    " the queue. Create a new fragment list\n");
-		cfh = clnp_new_pkt(skb, dest, src, seg);
+	if (list_empty(clnp_frags)) {
+		cfh = clnp_new_pkt(skb);
 	} else {
-		if ((cfh = clnp_find(dest, src, seg)) == NULL) {
-			printk(KERN_INFO "Fragment List is not found\n"
-						"Create a new fragment list\n");
-			cfh = clnp_new_pkt(skb, dest, src, seg);
-		} else {
-			printk(KERN_INFO "Fragment list is found\n");
+		cfh = clnp_find(skb);
+		if (cnf == NULL) {
+			cfh = clnp_new_pkt(skb);
 		}
 	}
 
-	if (cfh != NULL) {
-		clnp_insert_frag(cfh, skb, seg);
-		if ((skb = clnp_comp_frag(cfh, seg->cng_tot_len))) {
-			printk(KERN_INFO "Fragments are complete\n");
-			return skb;
-		} else {
-			printk(KERN_INFO "Fragments are not complete\n");
-			return NULL;
+	if (cfh) {
+		clnp_insert_frag(cfh, skb);
+		if (clnp_fragl_complete(cfh)) {
+			return clnp_comp_frag(cfh);
 		}
-	} else {
-		return NULL;
 	}
+
+	return NULL;
 }

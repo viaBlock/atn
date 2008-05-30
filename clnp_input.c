@@ -9,35 +9,95 @@
  *		Tadeus Prastowo <eus@member.fsf.org>
  *
  * Changes (oldest at the top, newest at the bottom):
- *		Tadeus:		2008/03/30:
- *				Change the switch block in optional part
+ *		Tadeus:		- 2008/03/30:
+ *				* Change the switch block in options part
  *				processing of clnp_rcv_finish() to a private
  *				function opt_part_hndlr()
- *				Changing the use of a kmalloc() dynamically
+ *				* Changing the use of a kmalloc() dynamically
  *				allocated temporary variable `opt', which is
- *				used to hold an optional part during optional
- *				part processing of clnp_rcv_finish(), to an
- *				ordinary variable within the right scope to
- *				avoid overhead associated with kmalloc().
- *				Change the bulk of else part in function
+ *				used to hold a parameter of the options part
+ *				during options part processing of
+ *				clnp_rcv_finish(), to an ordinary variable
+ *				within the right scope to avoid overhead
+ *				associated with kmalloc()
+ *				* Change the bulk of else part in function
  *				clnp_decompose() with a single function memset()
  *				because the bulk of else part only sets clnph
  *				to zero
- *				2008/04/06:
- *				Replace all invocation of masking() with
+ *				- 2008/04/06:
+ *				* Replace all invocation of masking() with
  *				(& CNF_*)
+ *				- 2008/04/13:
+ *				* Replace all instances of `nh' that is used to
+ *				get the CLNP header part with clnp_hdr()
+ *				- 2008/04/14:
+ *				* Remove clnp_decompose(skb, clnph) from
+ *				clnp_rcv() because its sole use, besides copying
+ *				each field of the CLNP header from skb to clnph,
+ *				is to perform the same thing as ntohs() when
+ *				copying seglen (i.e.,
+ *				clnph->seglen = ntohs(skb->seglen)) but with the
+ *				following construct:
+ *				#if defined(__BIG_ENDIAN_BITFIELD)
+ *				...
+ *				#elif defined(__LITTLE_ENDIAN_BITFIELD)
+ *				...
+ *				#else
+ *				...
+ *				#endif
+ *				Another reason to remove clnp_decompose() is
+ *				that there is no need to copy the CLNP header
+ *				from skb because clnp_rcv() is read-only with
+ *				regards to skb
+ *				* Remove from clnp_rcv() the use of
+ *				seg = (struct clnp_segment *) kmalloc(
+ *				       sizeof(struct clnp_segment), GFP_KERNEL);
+ *				because of the same reason why clnp_decompose()
+ *				is removed
+ *				* Remove free_mem_alloc(), which is used to free
+ *				clnph and seg, because its service is rendered
+ *				useless after the removal of clnp_decompose()
+ *				and seg = (struct clnp_segment *) kmalloc()
+ *				- 2008/04/17:
+ *				* Replace `struct clnp_options opt' in
+ *				clnp_rcv_finish() with
+ *				`struct clnp_options *opt'
+ *				- 2008/04/20:
+ *				* Change clnp_rcv_finish(struct sk_buff *skb,
+ *				struct clnphdr *clnph, struct clnp_segment *seg,
+ *				int fas_len, int sp_flag, int ms_flag,
+ *				int er_flag, int type_flag) to
+ *				clnp_rcv_finish(struct sk_buff *skb) so that it
+ *				is clear that the other parameters are derived
+ *				from within skb
+ *				* Change clnp_local_deliver(struct sk_buff *skb,
+ *				struct clnphdr *clnph, struct clnp_segment *seg,
+ *				int ms_flag) to
+ *				clnp_local_deliver(struct sk_buff *skb) with the
+ *				same reason as above
+ *				* Replace `if ((type_flag != CLNP_DT)
+ *						&& (type_flag != CLNP_MD)
+ *						&& (type_flag != CLNP_ER)
+ *						&& (type_flag != CLNP_ERQ)
+ *						&& (type_flag != CLNP_ERP))'
+ *				in clnp_rcv() with `switch' to make it easier to
+ *				read and maintain
+ *				* Add `check PDU size' block in clnp_rcv()
  *
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
+ *		as published by the Free Software Foundation; either version 2
+ *		of the License, or (at your option) any later version.
  */
 
+#include <asm/types.h>
+#include <linux/byteorder/generic.h>
 #include <linux/clnp.h>
 #include <linux/kernel.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
+#include <linux/stddef.h>
 #include <linux/string.h>
 #include <net/clnp.h>
 
@@ -47,21 +107,20 @@
 
 /**
  * opt_part_hndlr - a private function to be used within clnp_rcv_finish()
- * @opt: the optional part to be processed
+ * @opt: the parameter of the options part of a CLNP header to be processed
  *
- * Returns -1 if opt->cno_code is illegal (i.e., not listed in linux/clnp.h).
- * Returns 0 if opt->cno_code is legal.
+ * Returns -1 if opt->code is illegal (i.e., not listed in linux/clnp.h).
+ * Returns 0 if opt->code is legal.
  */
-static int opt_part_hndlr(struct clnp_options *opt)
-						__attribute__ ((always_inline));
+static __always_inline int opt_part_hndlr(struct clnp_options *opt);
 
 /*
  * End: Private function prototypes
  */
 
-static int opt_part_hndlr(struct clnp_options *opt)
+static __always_inline int opt_part_hndlr(struct clnp_options *opt)
 {
-	switch (opt->cno_code) {
+	switch (opt->code) {
 	case CLNPOPT_PC_PAD:
 		printk(KERN_INFO "Option: padding\n");
 		break;
@@ -87,7 +146,7 @@ static int opt_part_hndlr(struct clnp_options *opt)
 		printk(KERN_INFO "Option: radius scope control\n");
 		break;
 	default:
-		printk(KERN_INFO "Option: unknown option\n");
+		printk(KERN_INFO "Option: unknown parameter\n");
 		return -1;
 	}
 
@@ -102,268 +161,180 @@ int clnp_addr_ck (struct clnphdr * clnph)
 int clnp_rcv(struct sk_buff *skb, struct net_device *dev,
 			    struct packet_type *pt, struct net_device *orig_dev)
 {
-	/* pointer to fixed and address part */
 	struct clnphdr *clnph = NULL;
+	int clnph_hdrlen = 0;
+	int pdu_size = 0;
+	int sp_flag = 0;
+	int ms_flag = 0;
+	int er_flag = 0;
+	int type_flag = 0;
+	int err_location = 0;
+	int rc = 0;
 
-	/* fixed part variables */
-	int	sp_flag;	/* hold the SP flag value */
-	int	ms_flag;	/* hold the MS flag value */
-	int	er_flag;	/* hold the ER flag value */
-	int	type_flag;	/* hold the PDU type value */
+	/* check the existence of a CLNP header */
+	if (!pskb_may_pull(skb, sizeof(struct clnphdr))) {
+		err_location = 6;
+		goto discard_incomplete;
+	}
+	clnph = clnp_hdr(skb);
 
-	/* segmentation part variables */
-	struct clnp_segment *seg = NULL; /* pointer to segmentation part */
-	__u8	*seg_temp = NULL; /* temporary pointer to a segmented part */
-
-	/* optional part variables */
-	int	fas_len; /* length of fixed + address + segment part */
-
-	printk(KERN_INFO "clnp_rcv(): Hello, a CLNP packet is captured.\n");
-
-	/*
-	 * Reads the skb->nh.raw we've just accepted and saves the values in
-	 * the clnphdr struct
-	 */
-	clnph = (struct clnphdr *) kmalloc(sizeof(__u8) * MIN_HDR_LEN
-								  , GFP_KERNEL);
-	if (clnph) {
-		printk(KERN_INFO "Processing header decomposition...\n");
-		clnp_decompose(skb, clnph); /* this assigns values to clnph */
-	} else {
-		printk(KERN_INFO "Cannot allocate memory for clnph\n");
+	/* check the completeness of the datagram */
+	pdu_size = ntohs(clnph->seglen);
+	if (skb->len < pdu_size) {
+		goto discard_incomplete;
 	}
 
-	print_header_clnp(clnph); /* print the header (fixed & address part) */
+	/* check the network layer protocol ID */
+	if (clnph->nlpid != CLNP_NLPID) {
+		rc = -NLPID_ERROR;
+		goto drop;
+	}
+
+	/* check the version */
+	if (clnph->vers != CLNP_VERSION) {
+		goto discard_unsupported_vers;
+	}
+
+	/* check the checksum */
+	if (clnph->cksum_lsb + clnph->cksum_msb != 0) {
+		if (clnp_check_csum(skb, clnph->hdrlen) != 1) {
+			err_location = 0;
+			goto discard_bad_csum;
+		}
+	}
+
+	/* check the lifetime (discard if the TTL is zero) */
+	if (clnph->ttl == 0) {
+		goto discard_syntax_error;
+	}
+
+	/* check the value range of the header */
+	clnph_hdrlen = clnph->hdrlen;
+	if (clnph_hdrlen < MIN_HDR_LEN || clnph_hdrlen > MAX_HDR_LEN) {
+		goto discard_syntax_error;
+	}
+
+	/* check flag */
+	int sp_flag = clnph->flag & SP_MASK;
+	int ms_flag = clnph->flag & MS_MASK;
+	int er_flag = clnph->flag & ER_MASK;
+	int type_flag = clnph->flag & TYPE_MASK;
+
+	/* check the PDU type flag */
+	switch (type_flag) {
+	case CLNP_DT:
+	case CLNP_MD:
+	case CLNP_ER:
+	case CLNP_ERQ:
+	case CLNP_ERP:
+		break;
+	default:
+		goto discard_unknown_type;
+	}
 
 	/*
-	 * The following is the header format analysis functions
+	 * Segmentation part
 	 */
-
-	/*
-	 * Fixed part
-	 */
-	printk(KERN_INFO "Performing header format analysis...\n");
-
-	if (clnph->cnf_proto_id == NLPID) {
-		/* check the checksum */
-		printk(KERN_INFO "Checking checksum value...\n");
-		if (clnph->cnf_cksum_lsb + clnph->cnf_cksum_msb != 0) {
-			if (clnp_check_csum(skb, (int) clnph->cnf_hdr_len) == 1)
-			{
-				printk(KERN_INFO "Checksum is correct\n");
-			} else {
-				printk(KERN_INFO "Checksum error\n");
-				goto discard_bad_csum;
-			}
-		} else {
-			printk(KERN_INFO "Checksum is correct\n");
-		}
-
-		/* check length indicator */
-		printk(KERN_INFO "Checking header length value...\n");
-		printk(KERN_INFO "Header length: %d\n", clnph->cnf_hdr_len);
-		if (clnph->cnf_hdr_len < MIN_HDR_LEN
-					  || clnph->cnf_hdr_len > MAX_HDR_LEN) {
-			printk(KERN_INFO "Header length error\n");
-			goto discard_syntax_error;
-		} else {
-			printk(KERN_INFO "Header length is OK\n");
-		}
-
-		/* check the version */
-		printk(KERN_INFO "Checking version value...\n");
-		if (clnph->cnf_vers != CLNPVERSION) {
-			printk(KERN_INFO "Version error\n");
-			goto discard_syntax_error;
-		} else {
-			printk(KERN_INFO "Version is OK\n");
-		}
-
-		/* check the lifetime (discard if the TTL is zero) */
-		printk(KERN_INFO "Checking lifetime value...\n");
-		if (clnph->cnf_ttl == 0) {
-			printk(KERN_INFO "TTL expired\n");
-			goto discard_syntax_error;
-		} else {
-			printk(KERN_INFO "TTL is OK\n");
-		}
-
-		/* check the flag - SP, MS, and E/R */
-		printk(KERN_INFO "Checking flag status...\n");
-		sp_flag = clnph->cnf_flag & CNF_SP;
-		printk(KERN_INFO "sp = %d\n", sp_flag);
-		ms_flag = clnph->cnf_flag & CNF_MS;
-		printk(KERN_INFO "ms = %d\n", ms_flag);
-		er_flag = clnph->cnf_flag & CNF_ER;
-		printk(KERN_INFO "er = %d\n", er_flag);
-
-		/* check the PDU type flag */
-		type_flag = clnph->cnf_flag & CNF_TYPE;
-		if ((type_flag != CLNP_DT) && (type_flag != CLNP_MD)
-			    && (type_flag != CLNP_ER) && (type_flag != CLNP_ERQ)
-			    			   && (type_flag != CLNP_ERP)) {
-			printk(KERN_INFO "Invalid PDU type\n");
-			goto discard_unknown_type;
-		}
-
-		/* check the segment length */
-		if (!sp_flag) {
-			printk(KERN_INFO "Total CLNP packet length: %d\n"
-							   , clnph->cnf_seglen);
-		}
+	if (sp_flag) {
+		struct clnp_segment *seg =
+					 (struct clnp_segment) clnph->next_part;
 
 		/*
-		 * Segmentation part
-		 */
-		if (sp_flag) {
-			/*
-			 * Check whether the packet type is an Error Report PDU.
-			 * If yes, it's an error because an Error Report PDU
-			 * packet may not have any segmentation part.
-			 */
-			if (type_flag == CLNP_ER) {
-				printk(KERN_INFO "Error: an ER PDU may not have"
-						    " any segmentation part\n");
-				goto discard_syntax_error;
-			}
-
-			/*
-			 * If there's a segmentation part, add 6 octets
-			 * to indicate the total header length
-			 */
-			fas_len = FA_LEN + SEG_LEN;
-
-			seg = (struct clnp_segment *) kmalloc(
-				       sizeof(struct clnp_segment), GFP_KERNEL);
-			printk(KERN_INFO "Analyzing the segmentation part...\n")
-									       ;
-			if (seg) {
-#if defined(__BIG_ENDIAN_BITFIELD)
-				seg_temp = (__u8*) &seg->cng_id;
-				seg_temp[0] = skb->nh.raw[51];
-				seg_temp[1] = skb->nh.raw[52];
-
-				seg_temp = (__u8*) &seg->cng_off;
-				seg_temp[0] = skb->nh.raw[53];
-				seg_temp[1] = skb->nh.raw[54];
-
-				seg_temp = (__u8*) &seg->cng_tot_len;
-				seg_temp[0] = skb->nh.raw[55];
-				seg_temp[1] = skb->nh.raw[56];
-#elif defined(__LITTLE_ENDIAN_BITFIELD)
-				seg_temp = (__u8*) &seg->cng_id;
-				seg_temp[0] = skb->nh.raw[52];
-				seg_temp[1] = skb->nh.raw[51];
-
-				seg_temp = (__u8*) &seg->cng_off;
-				seg_temp[0] = skb->nh.raw[54];
-				seg_temp[1] = skb->nh.raw[53];
-
-				seg_temp = (__u8*) &seg->cng_tot_len;
-				seg_temp[0] = skb->nh.raw[56];
-				seg_temp[1] = skb->nh.raw[55];
-#else
-#error Only handle little and big endian byte-orders
-#endif
-
-				/* print the value of the segmentation part */
-				print_header_segment(seg);
-
-				/* check the segmentation offset */
-				printk(KERN_INFO "Checking segmentation offset"
-							      " value. . . \n");
-				if (seg->cng_off % 8 == 0) {
-					printk(KERN_INFO "Segmentation offset"
-					       " is correct (multiple of 8)\n");
-				} else {
-					printk(KERN_INFO "Segmentation offset"
-						" error (not multiple of 8)\n");
-					goto discard_syntax_error;
-				}
-			} else {
-				printk(KERN_INFO "Cannot allocate memory for"
-						       " segmentation part!\n");
-			}
-		} else {
-			printk(KERN_INFO "No segmentation part exists\n");
-
-			/*
-			 * If there's no segment part exist, the total header
-			 * length is fixed + address only
-			 */
-			fas_len = FA_LEN;
+			* Check whether the packet type is an Error Report PDU.
+			* If yes, it's an error because an Error Report PDU
+			* packet may not have any segmentation part.
+			*/
+		if (type_flag == CLNP_ER) {
+			printk(KERN_INFO "Error: an ER PDU may not have"
+						" any segmentation part\n");
+			goto discard_syntax_error;
 		}
 
-		clnp_rcv_finish(skb, clnph, seg, fas_len, sp_flag, ms_flag
-							  , er_flag, type_flag);
-		return 0;
-	} else if (clnph->cnf_proto_id == 0) {
-		printk(KERN_INFO "Inactive network layer protocol\n");
-		goto discard_syntax_error;
-	} else {
-		printk(KERN_INFO "Unknown network layer protocol\n");
-		goto discard_syntax_error;
+		printk(KERN_INFO "Analyzing the segmentation part:\n");
+
+		/* print the value of the segmentation part */
+		print_header_segment(seg);
+
+		/* check the segmentation offset */
+		printk(KERN_INFO "Check segmentation offset value: ");
+		if (ntohs(seg->off) % 8 == 0) {
+			printk(KERN_INFO "Segmentation offset is"
+						" correct (multiple of 8)\n");
+		} else {
+			printk(KERN_INFO "Segmentation offset error"
+						" (not multiple of 8)\n");
+			goto discard_syntax_error;
+		}
 	}
+	/* Else,
+	 * if sp_flag is off but the packet has a segmentation part,
+	 * the segmentation part is recognized as an option and will
+	 * generate an error because the option code is unrecognized
+	 *
+	 * } -- erase this when done in opt_rcv (eus)
+	 */
+
+	clnp_rcv_finish(skb, clnph_derived, seg, fas_len, SP_derived, MS_derived
+							, ER_derived, TYPE_derived);
+	return 0;
 
 discard_bad_csum:
-	free_mem_alloc(clnph, seg);
-	clnp_discard(skb, GEN_BADCSUM);
-	return -1;
+	clnp_discard(skb, GEN_BADCSUM, err_location);
+	return -GEN_BADCSUM;
 
 discard_syntax_error:
-	free_mem_alloc(clnph, seg);
-	clnp_discard(skb, GEN_HDRSYNTAX);
-	return -2;
+	clnp_discard(skb, GEN_HDRSYNTAX, err_location);
+	return -GEN_HDRSYNTAX;
 
 discard_unknown_type:
-	free_mem_alloc(clnph, seg);
-	clnp_discard(skb, GEN_UNKNOWN);
-	return -3;
+	clnp_discard(skb, GEN_UNKNOWN, err_location);
+	return -GEN_UNKNOWN;
+
+discard_incomplete:
+	clnp_discard(skb, GEN_INCOMPLETE, err_location);
+	return -GEN_INCOMPLETE;
+
+discard_unsupported_vers:
+	clnp_discard(skb, DISC_UNSUPPVERS, err_location);
+	return -DISC_UNSUPPVERS;
+drop:
+	kfree_skb(skb);
+	return rc;
 }
 
-void clnp_rcv_finish(struct sk_buff *skb, struct clnphdr *clnph,
+void clnp_rcv_finish(struct sk_buff *skb)
+{, struct clnphdr *clnph,
 			     struct clnp_segment *seg, int fas_len, int sp_flag,
-					int ms_flag, int er_flag, int type_flag)
-{
-	/* address part's variable */
-	__u8 our_addr[CLNP_ADDR_LEN] = {0};
+					int ms_flag, int er_flag, int type_flag
+	struct clnphdr *clnph_skb = clnp_hdr(skb);
+	__u8 our_addr[NSAP_ADDR_LEN] = {0}; /* address part's variable */
 
-	/* optional parts' variables */
+	/* options part's variables */
 	int opt_idx = 0;
 	int count = 0;
 
 	/*
-	 * Optional part processing
+	 * Options part processing
 	 */
 
 	/*
-	 * Check for optional parts. While the header length value is larger than
-	 * (fixed + address + segment) length (fas_len), there is an optional
-	 * part after it.
+	 * Check for the parameter of the options part. While the header length
+	 * value is larger than (fixed + address + segmentation) length
+	 * (fas_len), the CLNP header has an options part.
 	 */
-	if (clnph->cnf_hdr_len > fas_len) {
-		struct clnp_options opt;
+	if (clnph->hdrlen > fas_len) {
+		struct clnp_options *opt;
 
-		printk(KERN_INFO "Analyzing the optional part...\n");
-		opt_idx = fas_len; /* starting index of the optional part */
-		while (opt_idx < clnph->cnf_hdr_len) {
-			opt.cno_code = skb->nh.raw[opt_idx];
-			opt.cno_len = skb->nh.raw[opt_idx + 1];
-			opt.cno_value = &skb->nh.raw[opt_idx + 2];
+		printk(KERN_INFO "Analyzing the parameter of the options"
+								  " part...\n");
+		opt_idx = fas_len; /* starting index of the options part */
+		while (opt_idx < clnph->hdrlen) {
+			opt = (struct clnp_options *) (clnph_skb + opt_idx);
 
-			/* print the value of the optional part */
-			print_header_options(&opt);
+			/* print the value of the parameter */
+			print_header_options(opt);
 
-			if (opt.cno_code != REASON_DISCARD) {
-				if (opt_part_hndlr(&opt) == -1)
-				{
-					goto discard_syntax_error;
-				}
-				count++; /* how many parts are there? */
-
-				/* fetch the next optional part */
-				opt_idx += (opt.cno_len + 2);
-			} else {
+			if (opt->code == REASON_DISCARD) {
 				if (type_flag == CLNP_ER) {
 					printk(KERN_INFO "This is reason for"
 								  " discard\n");
@@ -373,13 +344,23 @@ void clnp_rcv_finish(struct sk_buff *skb, struct clnphdr *clnph,
 					goto discard_syntax_error;
 				}
 
-				/* fetch the next optional part */
+				/* fetch the next parameter */
 				opt_idx += REASON_LEN;
+			} else {
+				if (opt_part_hndlr(opt) == -1)
+				{
+					goto discard_syntax_error;
+				}
+				count++; /* how many parts are there? */
+
+				/* fetch the next parameter */
+				opt_idx += (opt->len + 2);
 			}
 		}
-		printk(KERN_INFO "Found %d optional parts\n", count);
+		printk(KERN_INFO "Found %d parameter(s) in the options part\n"
+								       , count);
 	} else {
-		printk(KERN_INFO "No optional part exists\n");
+		printk(KERN_INFO "No parameter exists in the options part\n");
 	}
 
 	/*
@@ -388,7 +369,7 @@ void clnp_rcv_finish(struct sk_buff *skb, struct clnphdr *clnph,
 	get_nsap_addr(our_addr);
 
 	/* check the address length value */
-	printk(KERN_INFO "Checking the addresses' length. . . ");
+	printk(KERN_INFO "Checking the addresses' length... ");
 	if (clnp_addr_ck(clnph) == 1) {
 		printk(KERN_INFO "No error in address length (value = 20)\n");
 	} else {
@@ -407,13 +388,12 @@ void clnp_rcv_finish(struct sk_buff *skb, struct clnphdr *clnph,
 	}
 
 discard_syntax_error:
-	free_mem_alloc(clnph, seg);
 	clnp_discard(skb, GEN_HDRSYNTAX);
 }
 
 int is_our_dgram(struct clnphdr *clnph, __u8 *my_addr)
 {
-	if (clnph->dest_len == CLNP_ADDR_LEN
+	if (clnph->dest_len == NSAP_ADDR_LEN
 		 && (memcmp(my_addr, clnph->dest_addr, clnph->dest_len) == 0)) {
 		return 1;
 	} else {
@@ -425,7 +405,7 @@ void clnp_local_deliver(struct sk_buff *skb, struct clnphdr *clnph,
 					  struct clnp_segment *seg, int ms_flag)
 {
 	if (seg) {
-		if (ms_flag || seg->cng_off != 0) {
+		if (ms_flag || ntohs(seg->off) != 0) {
 			printk(KERN_INFO "Defragmenting packet...\n");
 			skb = (struct sk_buff *) clnp_defrag(skb
 							, clnph->dest_addr
@@ -436,36 +416,10 @@ void clnp_local_deliver(struct sk_buff *skb, struct clnphdr *clnph,
 		}
 	}
 	clnp_local_deliver_finish(skb);
-
-	free_mem_alloc(clnph, seg); /* free clnph and seg if they exist */
 }
 
 void clnp_local_deliver_finish(struct sk_buff *skb)
 {
-	unsigned int clnp_hdr_len = skb->nh.raw[IDX_HDR_LEN];
-
-	printk(KERN_INFO "The complete skb is delivered to the transport"
-								    " layer\n");
-
-	__skb_pull(skb, clnp_hdr_len);
-
-	/* point into the CLNP datagram, just past the header. */
-	skb->h.raw = skb->data;
-
+	skb_pull(skb, clnp_hdr(skb)->hdrlen);
 	printk(KERN_INFO "Packet is now passed to the transport layer\n");
-}
-
-int free_mem_alloc(struct clnphdr *clnph, struct clnp_segment *seg)
-{
-	if (clnph != NULL) {
-		kfree(clnph);
-		printk(KERN_INFO "clnph free\n");
-	}
-
-	if (seg != NULL) {
-		kfree(seg);
-		printk(KERN_INFO "seg free\n");
-	}
-
-	return 0;
 }

@@ -5,179 +5,166 @@
  *
  * Authors:	Bunga Sugiarto <bunga.sugiarto@student.sgu.ac.id>
  *		Husni Fahmi <fahmi@inn.bppt.go.id>
+ *		Tadeus Prastowo <eus@member.fsf.org>
  *
  * Changes (oldest at the top, newest at the bottom):
- *		Tadeus:		2008/04/01:
- *				Fix a memory leak in clnp_emit_er() because
+ *		Tadeus:		- 2008/04/01:
+ *				* Fix a memory leak in clnp_emit_er() because
  *				our_addr, skb_err->data, and skb_err were not
  *				freed
- *				2008/04/06:
- *				Replace all invocation of masking() with
+ *				- 2008/04/06:
+ *				* Replace all invocation of masking() with
  *				(& CNF_*)
+ *				- 2008/04/13:
+ *				* Replace all instances of `nh' that is used to
+ *				get the CLNP header part with clnp_hdr()
+ *				- 2008/04/14:
+ *				* Replace skb_err = (struct sk_buff *) kmalloc(
+ *				sizeof(struct sk_buff), GFP_KERNEL) in
+ *				clnp_emit_er() with skb_err = alloc_skb()
+ *				because `struct sk_buff' must always be created
+ *				with alloc_skb() or its wrapper functions
+ *				* Replace merge_chars_to_short() with
+ *				ntohs(clnph->seglen)
+ *				* Replace the following construct
+ *				#if defined(__BIG_ENDIAN_BITFIELD)
+ *				...
+ *				#elif defined(__LITTLE_ENDIAN_BITFIELD)
+ *				...
+ *				#else
+ *				...
+ *				#endif
+ *				with the equivalent htons()
+ *				- 2008/04/15:
+ *				* Make clnp_emit_er() more elegant by harnessing
+ *				the introduction of next_part to
+ *				`struct clnphdr' and the alteration of value
+ *				in `struct clnp_options'
+ *				- 2008/04/19:
+ *				* Complete restructuring of clnp_emit_er() sans
+ *				altering its logic
+ *				- 2008/??/??:
+ *				* Finish a major overhaul of clnp_discard() and
+ *				clnp_emit_er()
  *
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
+ *		as published by the Free Software Foundation; either version 2
+ *		of the License, or (at your option) any later version.
  */
 
 #include <asm/types.h>
+#include <linux/byteorder/generic.h>
 #include <linux/clnp.h>
 #include <linux/kernel.h>
+#include <linux/netdevice.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <net/clnp.h>
 
-void clnp_emit_er (struct sk_buff *skb, __u8 reason)
+/* Private Function Prototypes */
+static void clnp_emit_er(struct sk_buff *skb, __u8 reason, __u8 location
+							      , gfp_t gfp_mask);
+
+/*
+ * clnp_discard() shall only perform sanity check on @skb to decide whether to
+ * actually send back an error report PDU by invoking clnp_emit_er() or not
+ */
+int clnp_discard(struct sk_buff *skb, __u8 reason, __u8 location
+							       , gfp_t gfp_mask)
 {
-	__u8 type = 0;
-	__u8 sp = 0;
-	__u8 ms = 0;
-	int idx_opt = 0;
-	int idx_data = 0;
-	int opt_len = 0;
-	int opt_exist = 0;
-	int idx_err_code = 0;
-	int idx_err_len = 0;
-	int idx_err_type = 0;
-	int idx_err_field = 0;
-	unsigned short seglen = 0;
-	unsigned short hdrlen = 0;
-	unsigned char *seglenPtr = NULL;
-	__u8 *our_addr = NULL;
-	struct sk_buff *skb_err = NULL;
+	struct clnphdr *clnph = NULL;
 
-	type = skb->nh.clnph->cnf_flag & CNF_TYPE;
-	sp = skb->nh.clnph->cnf_flag & CNF_SP;
-	ms = skb->nh.clnph->cnf_flag & CNF_MS;
-	opt_exist = 0;
+	skb = skb_clone(skb, gfp_mask);
+	clnph = clnp_hdr(skb);
 
-	/* check whether the error PDU is an Error Report PDU */
-	if(type == CLNP_ER) {
-		return;
-	}
-
-	/* compose a new error report */
-	skb_err = (struct sk_buff *) kmalloc(sizeof(struct sk_buff),
-								    GFP_KERNEL);
-
-	/* check whether segmentation part and/or optional part exist in the
-								    error PDU */
-	if (skb->nh.raw[IDX_HDR_LEN] > MIN_HDR_LEN) {
-		/* check whether segmentation part exist in the error PDU */
-		if (sp) {
-			/* check whether optional part exist in the error PDU */
-			if (skb->nh.raw[IDX_HDR_LEN] > (MIN_HDR_LEN + 6)) {
-				opt_exist = 1;
-				idx_opt = MIN_HDR_LEN + 6;
-				opt_len = skb->nh.raw[IDX_HDR_LEN] - MIN_HDR_LEN
-									    - 6;
-			}
-		} else {
-			opt_exist = 1;
-			idx_opt = MIN_HDR_LEN;
-			opt_len = skb->nh.raw[IDX_HDR_LEN] - MIN_HDR_LEN;
-		}
+	if ((clnph->flag & TYPE_MASK != CLNP_ER) && (clnph->flag & ER_MASK)) {
+		return clnp_emit_er(skb, reason, location, gfp_mask);
 	} else {
-		opt_len = 0;
+		kfree_skb(skb);
 	}
 
-	/* header length of Error Report PDU is the total length of
-				fixed + address + option + reason for discard */
-	hdrlen = (unsigned short) (MIN_HDR_LEN + opt_len + REASON_LEN);
-
-	/* total length of ER PDU equals header length + data (header of the
-							       discarded PDU) */
-	seglen = (unsigned short) (hdrlen + skb->nh.raw[IDX_HDR_LEN]);
-
-	skb_err->data = (unsigned char *) kmalloc(sizeof(unsigned char)
-						  * (seglen + 100), GFP_KERNEL);
-
-	skb_err->nh.raw = skb_err->data;
-	skb_err->nh.raw[IDX_PROTO_ID] = NLPID;
-	skb_err->nh.raw[IDX_HDR_LEN] = hdrlen;
-	skb_err->nh.raw[IDX_VERS] = CLNPVERSION;
-	skb_err->nh.raw[IDX_TTL] = CLNP_TTL_UNITS;
-	skb_err->nh.raw[IDX_FLAG] = set_flag(0, 0, 0, CLNP_ER);
-
-	seglenPtr = (unsigned char *) &seglen;
-
-#if defined(__LITTLE_ENDIAN_BITFIELD)
-	skb_err->nh.raw[IDX_SEGLEN_MSB] = seglenPtr[1];
-	skb_err->nh.raw[IDX_SEGLEN_LSB] = seglenPtr[0];
-#elif defined(__BIG_ENDIAN_BITFIELD)
-	skb_err->nh.raw[IDX_SEGLEN_MSB] = seglenPtr[0];
-	skb_err->nh.raw[IDX_SEGLEN_LSB] = seglenPtr[1];
-#else
-#error Only handle little and big endian byte-orders
-#endif
-
-	skb_err->nh.raw[IDX_CKSUM_MSB] = 0;
-	skb_err->nh.raw[IDX_CKSUM_LSB] = 0;
-
-	skb_err->nh.raw[IDX_DEST_LEN] = skb->nh.raw[IDX_SRC_LEN];
-	memcpy(&(skb_err->nh.raw[IDX_DEST_ADDR]), &(skb->nh.raw[IDX_SRC_ADDR]),
-						      skb->nh.raw[IDX_SRC_LEN]);
-
-	skb_err->nh.raw[IDX_SRC_LEN] = CLNP_ADDR_LEN;
-	our_addr = (__u8 *) kmalloc(sizeof(__u8) * CLNP_ADDR_LEN, GFP_KERNEL);
-	get_nsap_addr(our_addr);
-	memcpy(&(skb_err->nh.raw[IDX_SRC_ADDR]), &(our_addr[0]),
-						  skb_err->nh.raw[IDX_SRC_LEN]);
-	if (opt_exist) {
-		memcpy(&(skb_err->nh.raw[IDX_NEXT_HDR]), &(skb->nh.raw[idx_opt])
-								     , opt_len);
-		idx_err_code = MIN_HDR_LEN + opt_len;
-	} else {
-		idx_err_code = MIN_HDR_LEN;
-	}
-
-	idx_err_len = idx_err_code + 1;
-	idx_err_type = idx_err_len + 1;
-	idx_err_field = idx_err_type + 1;
-	skb_err->nh.raw[idx_err_code] = REASON_DISCARD;
-	skb_err->nh.raw[idx_err_len] = 2;
-	skb_err->nh.raw[idx_err_type] = reason;
-	skb_err->nh.raw[idx_err_field] = 0;
-	clnp_gen_csum(skb_err, skb_err->nh.raw[IDX_HDR_LEN]);
-	idx_data = idx_err_field + 1;
-	memcpy(&(skb_err->data[idx_data]), &(skb->nh.raw[IDX_PROTO_ID])
-						    , skb->nh.raw[IDX_HDR_LEN]);
-
-	printk(KERN_INFO "Error report PDU\n");
-
-	kfree(our_addr);
-	kfree(skb_err->data);
-	kfree(skb_err);
+	return 0;
 }
 
-void clnp_discard(struct sk_buff *skb, __u8 reason)
+static int clnp_emit_er (struct sk_buff *skb, __u8 reason, __u8 location
+							       , gfp_t gfp_mask)
 {
-	__u8 type = 0;
-	__u8 er = 0;
-	__u16 len = 0;
+	struct net_device *dev_out = skb->dev;
 
-	printk(KERN_INFO "Entering clnp_discard()\n");
-	type = er = 0;
-	len = merge_chars_to_short(skb->nh.raw[IDX_SEGLEN_MSB],
-						   skb->nh.raw[IDX_SEGLEN_LSB]);
+	struct clnphdr *clnph = NULL;
+	__u8 clnph_hdrlen = 0;
+	__u8 *clnph_opt = 0;
+	__u8 clnph_opt_len = 0;
 
-	if (skb != NULL) {
-		if(len >= skb->nh.raw[IDX_HDR_LEN]) {
-			type = skb->nh.clnph->cnf_flag & CNF_TYPE;
-			er = skb->nh.clnph->cnf_flag & CNF_ER;
+	struct sk_buff *err = NULL;
+	struct clnphdr *err_clnph = NULL;
+	__u8 err_hdrlen = 0;
+	__u16 err_seglen = 0;
+	struct clnp_options *reason_for_discard = NULL;
 
-			if ((type != CLNP_ER) && er) {
-				printk(KERN_INFO "Emit an Error Report PDU \n");
-				clnp_emit_er(skb, reason);
-			} else {
-				printk(KERN_INFO "No error report generated\n");
-			}
-		}
-
-		kfree(skb->nh.clnph);
+	if (!dev_out) {
 		kfree_skb(skb);
-		printk(KERN_INFO "PDU Discarded\n");
+		return -ENODEV;
 	}
+
+	clnph = clnp_hdr(skb);
+	clnph_hdrlen = clnph->hdrlen > skb->len ? skb->len : clnph->hdrlen;
+	clnph_opt = clnph->next_part;
+
+	/* how long is the options part of clnph? */
+	if (clnph_hdrlen > CLNP_FIX_LEN) {
+		if (clnph->flag & SP_MASK) {
+			if (clnph_hdrlen > (CLNP_FIX_LEN + SEG_LEN)) {
+				clnph_opt += SEG_LEN;
+				clnph_opt_len = clnph_hdrlen - CLNP_FIX_LEN
+								      - SEG_LEN;
+			}
+		} else {
+			clnph_opt_len = clnph_hdrlen - CLNP_FIX_LEN;
+		}
+	}
+
+	/* instantiating the CLNP ER PDU */
+	err_hdrlen = CLNP_FIX_LEN + clnph_opt_len + REASON_LEN;
+	err_seglen = err_hdrlen + clnph_hdrlen;
+
+	err = alloc_skb(atn_skb_headroom + err_seglen, gfp_mask);
+
+	/* loading the CLNP ER payload */
+	skb_reserve(err, atn_skb_headroom(dev_out) + err_hdrlen);
+	memcpy(skb_put(skb, clnph_hdrlen), clnph, clnph_hdrlen);
+
+	/* loading the CLNP ER header */
+	err_clnph = (struct clnphdr *) skb_push(err, err_hdrlen);
+
+	err_clnph->nlpid = CLNP_NLPID;
+	err_clnph->hdrlen = err_hdrlen;
+	err_clnph->vers = CLNP_VERSION;
+	err_clnph->ttl = CLNP_TTL_UNITS;
+	err_clnph->flag = set_flag(0, 0, 0, CLNP_ER);
+	err_clnph->seglen = htons(err_seglen);
+	err_clnph->cksum_msb = 0;
+	err_clnph->cksum_lsb = 0;
+	err_clnph->dest_len = clnph->src_len;
+	memcpy(err_clnph->dest_addr, clnph->src_addr, clnph->src_len);
+	err_clnph->src_len = NSAP_ADDR_LEN;
+	/* Woi! */ error get_nsap_addr(err_clnph->src_addr);
+
+	if (clnph_opt_len) {
+		memcpy(err_clnph->next_part, clnph_opt, clnph_opt_len);
+	}
+
+	reason_for_discard = (struct clnp_options *) (err_clnph->next_part
+							       + clnph_opt_len);
+	reason_for_discard->code = REASON_DISCARD;
+	reason_for_discard->len = 2;
+	reason_for_discard->value[0] = reason;
+	reason_for_discard->value[1] = location;
+
+	clnp_gen_csum(err, err_clnph->hdrlen);
+
+	/* send the CLNP ER out */
+	return atn_xmit(skb);
 }

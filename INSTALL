@@ -2,25 +2,11 @@ Copyright (C) 2008  Tadeus Prastowo (eus at member dot fsf dot org)
 
 1. Check out the complete source tree.
 
-2. Add `struct clnphdr clnph' as a new member of union `nh'
-   in `struct sk_buff' defined in
-   `/lib/modules/`uname -r`/build/include/linux/skbuff.h'.
-   
-   struct sk_buff {
-           ...
-           union {
-                   ...
-                   struct clnphdr  *clnph;
-                   unsigned char   *raw;
-           } nh;
-           ...
-   };
-
-3. Copy ``pwd`/include/linux/*.h' and ``pwd`/include/net/*.h' to
+2. Copy ``pwd`/include/linux/*.h' and ``pwd`/include/net/*.h' to
    `/lib/modules/`uname -r`/build/include/linux/' and
    `/lib/modules/`uname -r`/build/include/net/', respectively.
 
-4. Add `#define AF_ATN 29' and `#define PF_ATN AF_ATN' to
+3. Add `#define AF_ATN 29' and `#define PF_ATN AF_ATN' to
    `/lib/modules/`uname -r`/build/include/linux/socket.h' and
    `/usr/include/bits/socket.h', respectively, as follows:
 
@@ -30,7 +16,7 @@ Copyright (C) 2008  Tadeus Prastowo (eus at member dot fsf dot org)
    ...
    #define AF_WANPIPE      25      /* Wanpipe API Sockets */
    #define AF_LLC          26      /* Linux LLC                    */
-   #define AF_ATN          29      /* ATN CLNP/TP4 Networking Suite */
+   #define AF_ATN          29      /* ATN TP4/CLNP Networking Suite */
    #define AF_TIPC         30      /* TIPC sockets                 */
    #define AF_BLUETOOTH    31      /* Bluetooth sockets            */
    ...
@@ -49,7 +35,7 @@ Copyright (C) 2008  Tadeus Prastowo (eus at member dot fsf dot org)
    /* Protocol families.  */
    ...
    #define PF_WANPIPE      25      /* Wanpipe API sockets.  */
-   #define PF_ATN          29      /* ATN CLNP/TP4 Networking Suite */
+   #define PF_ATN          29      /* ATN TP4/CLNP Networking Suite */
    #define PF_BLUETOOTH    31      /* Bluetooth sockets.  */
    ...
 
@@ -59,6 +45,51 @@ Copyright (C) 2008  Tadeus Prastowo (eus at member dot fsf dot org)
    #define AF_ATN          PF_ATN
    #define AF_BLUETOOTH    PF_BLUETOOTH
    ...
+
+4. Add a directory named `netatn' in /usr/include/.
+   Copy the following data to a file named `atn.h' put in the directory.
+
+================================== Copy Here ==================================
+/*
+ * ATN		An implementation of the ATN TP4/CLNP protocol suite for
+ *		the GNU/Linux operating system.  ATN is implemented using the
+ *		BSD Socket interface as the means of communication with
+ *		the user level.
+ *
+ *		PF_ATN protocol family socket handler.
+ *
+ * Authors:	Tadeus Prastowo <eus@member.fsf.org>
+ *
+ *		This program is free software; you can redistribute it and/or
+ *		modify it under the terms of the GNU General Public License
+ *		as published by the Free Software Foundation; either version 2
+ *		of the License, or (at your option) any later version.
+ */
+
+#ifndef __NETATN_ATN_H
+#define __NETATN_ATN_H 1
+
+#include <features.h>		/* for the glibc version number */
+#if __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 1
+#include <net/ethernet.h>	/* the L2 protocols */
+#else
+#include <linux/if_ether.h>	/* the L2 protocols */
+#endif
+
+#define NSAP_ADDR_LEN 20
+
+struct atn_addr {
+	unsigned char s_addr[NSAP_ADDR_LEN];
+};
+
+struct sockaddr_atn {
+	sa_family_t	satn_family;
+	struct atn_addr	satn_addr;
+	unsigned char	satn_mac_addr[ETH_ALEN];
+};
+
+#endif /* netatn/atn.h */
+================================== Copy Here ==================================
 
 5. Make sure you are in the directory containing the source code.
    Type `make' to build `atn.ko'.

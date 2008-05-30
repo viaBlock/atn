@@ -14,38 +14,72 @@
  *		Tadeus Prastowo <eus@member.fsf.org>
  *
  * Changes (oldest at the top, newest at the bottom):
- *		Pradana:	Define clnp_fixed, clnp_segment, and
+ *		Pradana:	* Define clnp_fixed, clnp_segment, and
  *				clnp_address structure
- *  		Melvin:		Define parameter type and parameter value for
+ *  		Melvin:		* Define parameter type and parameter value for
  *				the option part of CLNP
- *		Danny:		Define the extra variables (FIXED_LEN, ADDR_LEN,
- *				SEG_LEN, etc.)
- *		Danny:		Define general constant variable in header fixed
- *				part (CLNPVERSION, NLPID, MAXTTL)
- *		Danny:		Define mask for CLNP Flag Fields
- *		Danny:		Define CLNP packet types
- * 		Danny:		Define CLNP option structure
- *    		Bunga:		Define CLNP error codes
- *		Bunga:		Define CLNP header structure
- *		Bunga:		Add big and little endian condition inside
+ *		Danny:		* Define the extra variables (FIXED_LEN,
+ *				ADDR_LEN, SEG_LEN, etc.)
+ *		Danny:		* Define general constant variable in header
+ *				fixed part (CLNPVERSION, NLPID, MAXTTL)
+ *		Danny:		* Define mask for CLNP Flag Fields
+ *		Danny:		* Define CLNP packet types
+ * 		Danny:		* Define CLNP option structure
+ *    		Bunga:		* Define CLNP error codes
+ *		Bunga:		* Define CLNP header structure
+ *		Bunga:		* Add big and little endian condition inside
  *				clnp_fixed
- *		Tadeus:		2008/03/27:
- *				Clean up the code and notice that:
+ *		Tadeus:		- 2008/03/27:
+ *				* Clean up the code and notice that:
  *				- clnp_fixed and clnp_address structures have
  *				  been combined into clnphdr structure
  *				- FIXED_LEN has gone
- *				Move in clnp_fragl and clnp_frag from
+ *				* Move in clnp_fragl and clnp_frag from
  *				clnp_fragment.c to make all data structures
  *				available in one place
- *				2008/03/30:
- *				Change the way each field in a struct is
+ *				- 2008/03/30:
+ *				* Change the way each field in a struct is
  *				commented; from comments inside the struct to
  *				comments before the struct to follow Linux
  *				coding style guideline (kernel-doc nano-HOWTO)
- *				2008/04/06:
- *				Change CNF_ERR_OK to CNF_ER, CNF_MORE_SEGS to
- *				CNF_MS, and CNF_SEG_OK to CNF_SP for better mask
+ *				- 2008/04/06:
+ *				* Change ER_MASKR_OK to ER_MASK, CNF_MORE_SEGS to
+ *				MS_MASK, and CNF_SEG_OK to SP_MASK for better mask
  *				names
+ *				- 2008/04/14:
+ *				* Replace `#define IDX_SEGLEN_MSB 5' and
+ *				`#define IDX_SEGLEN_LSB 6' with
+ *				`#define IDX_SEGLEN 5' to harness htons() and
+ *				ntohs() eliminating the clutter in using
+ *				#if defined(__BIG_ENDIAN_BITFIELD)
+ *				...
+ *				#elif defined(__LITTLE_ENDIAN_BITFIELD)
+ *				...
+ *				#else
+ *				...
+ *				#endif
+ *				* Make it clear in the corresponding kernel-doc
+ *				that seglen of struct clnphdr along with
+ *				id, off, and tot_len of
+ *				struct clnp_segment are in network byte order
+ *				* Add __attribute__ ((packed)) to struct clnphdr
+ *				because its size (51 bytes) causes difficulty in
+ *				retrieving seglen with clnp_hdr() as a
+ *				result of memory alignment
+ *				- 2008/04/17:
+ *				* Add next_part to `struct clnphdr' so that the
+ *				following part of a CLNP header can be accessed
+ *				elegantly
+ *				* Replace `unsigned char *value' in
+ *				`struct clnp_options' with `__u8 value[0]'
+ *				because the data that value should point to
+ *				is always located contiguously with the data of
+ *				code and len (this saves the memory
+ *				space used up by the pointer)
+ *				- 2008/04/18:
+ *				* Replace NLPID with CLNP_NLPID to avoid
+ *				conflict in the future with NLPID of IS-IS and
+ *				ES-IS PDU
  *
  *		This program is free software; you can redistribute it and/or
  *		modify it under the terms of the GNU General Public License
@@ -62,52 +96,38 @@
 #include <linux/types.h>
 
 /*
- * Value for extra variables
+ * Various values for the fixed part of a CLNP header
  */
-#define MIN_HDR_LEN 51		/* the minimum total length of header */
-#define MAX_HDR_LEN 254		/* the maximum value of length indicator */
-#define CLNP_ADDR_LEN 20	/* the length of the address value */
-#define FA_LEN MIN_HDR_LEN	/* the length of fixed + address part */
-#define SEG_LEN 6		/* the total length of segmentation part */
-#define CLNP_OPTIONS 8		/* the number of option parameter codes */
-#define REASON_LEN 4		/* the length of the reason for discard */
+#define CLNP_VERSION	1	/* CLNP version */
+#define CLNP_NLPID	0x81	/* CLNP network layer protocol ID */
+#define INAC_NLPID	0x00	/* inactive network layer protocol ID */
+#define CLNP_MAXTTL	255	/* maximum time-to-live */
+#define CLNP_TTL_UNITS	2	/* 500 miliseconds */
+#define CLNP_FIX_LEN	51	/* the minimum length of a CLNP header */
+#define CLNP_HDR_MAX	254	/* the maximum length of a CLNP header */
+#define NSAP_ADDR_LEN	20	/* the length of the address value */
 
 /*
- * Variable value of fixed part
+ * Various values for the segmentation part of a CLNP header
  */
-#define CLNPVERSION 1		/* CLNP version */
-#define NLPID 0x81		/* CLNP network layer protocol ID */
-#define INLP 0x00		/* inactive network layer protocol */
-#define MAXTTL 255		/* maximum time-to-live */
-#define CLNP_TTL_UNITS 2	/* 500 miliseconds */
-#define CLNP_FIX_LEN 51
-#define CLNP_HDR_MAX 254
-#define CLNP_CSUM_LSB_IDX 8	/* Checksum parameter low significant byte is
-				 * located in the 8th index (9th octet) of clnp
-				 * header
-				 */
-#define CLNP_CSUM_MSB_IDX 7	/* Checksum parameter low significant byte is
-				 * located in the 7th index (8th octet) of clnp
-				 * header
-				 */
+#define SEG_LEN 6		/* the total length of a segmentation part */
 
 /*
  * Reassembly variables
  */
-#define CLNP_MAX_Q 64			/* maximum CLNP queues */
 #define CLNP_FRAG_TIME (30 * HZ)	/* fragment lifetime */
 
 /*
  * Mask for CLNP Flag field
  */
-#define CNF_TYPE 0x1F
-#define CNF_ER 0x20
-#define CNF_MS 0x40
-#define CNF_SP 0x80
+#define TYPE_MASK 0x1F
+#define ER_MASK 0x20
+#define MS_MASK 0x40
+#define SP_MASK 0x80
 
 /*
  * CLNP packet types: this is defined from the last 5 bits in the Flag field
- * inside fixed part of PDU
+ * inside a CLNP header
  */
 #define CLNP_DT 0x1C	/* Data Protocol Data Unit: normal data */
 #define CLNP_MD 0x1D	/* Multicast Data PDU */
@@ -123,7 +143,7 @@
 				 * IDI and binary DSP format
 				 */
 #define IDI_1 0x00		/* 1st byte initial domain identifier:
-#define IDI_2 0x1b		 * 2nd byte initial domain identifier:
+#define IDI_2 0x1B		 * 2nd byte initial domain identifier:
 				 *				ATN NSAP address
 				 */
 #define VER_G_AINSC 0x01	/* version:	ground AINSC NSAP address
@@ -134,10 +154,12 @@
 #define RDF 0x00		/* routing domain format: unassigned */
 
 /*
- * Optional part
+ * Options part of a CLNP header
  */
 
-/* Parameter for the optional part */
+/* Various parameters in the options part */
+#define CLNP_OPTIONS 8			/* the number of parameter codes */
+
 #define CLNPOPT_PC_PAD 0xCC		/* padding */
 #define CLNPOPT_PC_SEC 0xC5		/* security */
 #define CLNPOPT_PC_SRCROUTE 0xC8	/* source routing */
@@ -147,18 +169,23 @@
 #define CLNPOPT_PC_PBSC 0xC4		/* prefix based scope control */
 #define CLNPOPT_PC_RSC 0xC6		/* radius scope control */
 
-/* Parameter value for Security Option -- if cno_code equals to 0xC5 */
+/* Parameter value for Security Option -- if code equals to 0xC5 */
 #define SEC_RESERVED 0x00		/* reserved */
 #define SEC_SRCADDRSPECIFIC 0x40	/* source address specific */
 #define SEC_DESADDRSPECIFIC 0x80	/* destination address specific */
 #define SEC_GLOBALUNIQUE 0xC0		/* globally unique */
 
-/* Parameter value for Source Routing Option -- if cno_code equals to 0xC8 */
+/* Parameter value for Priority Option -- if code equals to 0xCD */
+#define PRIOR_NORMAL 0x00		/* normal (default) relative priority */
+/* ... other relative priority values can be specified between these ... */
+#define PRIOR_HIGHEST 0x0E		/* the highest relative priority */
+
+/* Parameter value for Source Routing Option -- if code equals to 0xC8 */
 #define SRCROUTE_RESERVED 0x00		/* reserved */
 #define SRCROUTE_COMPLETESRCROUTE 0x01	/* complete source routing */
 #define SRCROUTE_PARTIALSRCROUTE 0x02	/* partial source routing */
 
-/* Parameter value for Recording of Route Option -- if cno_code equals to 0xCB
+/* Parameter value for Recording of Route Option -- if code equals to 0xCB
  */
 #define ROR_PARTIAL 0x00 	/* partial recording of route in progress */
 #define ROR_COMPLETE 0x01	/* complete recording of route in progress */
@@ -169,7 +196,7 @@
 				 * (with timestamps)
 				 */
 
-/* Parameter value for QoS maintenance -- if cno_code equals to 0xC3 */
+/* Parameter value for QoS maintenance -- if code equals to 0xC3 */
 #define QOS_GLOBAL 0x00			/* globally unique with strong
 					 * forwarding
 					 */
@@ -184,6 +211,8 @@
 
 /* Parameter code for `Reason for Discard' */
 #define REASON_DISCARD 0xC1	/* reason for discard */
+#define REASON_LEN 4		/* the length of the reason for discard */
+#define CLNP_ERRORS 24		/* the total number of error codes below */
 
 /* General errors */
 #define GEN_NOREAS 0x00		/* reason not specified */
@@ -220,126 +249,96 @@
 
 /* Reassembly errors */
 #define REASS_INTERFERE 0xC0	/* reassembly interference */
-#define CLNP_ERRORS 24		/* amount of PDU error codes */
 
 /**
  * struct clnphdr - CLNP header
- * @cnf_proto_id: network layer protocol identifier
- * @cnf_hdr_len: length indicator
- * @cnf_vers: version/protocol ID extension
- * @cnf_ttl: lifetime
- * @cnf_flag: SP, MS, E/R, PDU type
- * @cnf_seglen: segment length
- * @cnf_cksum_msb: checksum - most significant byte
- * @cnf_cksum_lsb: checksum - least significant byte
+ * @nlpid: network layer protocol identifier
+ * @hdrlen: header length (length of fixed + segmentation + options part)
+ * @vers: version/protocol ID extension
+ * @ttl: lifetime
+ * @flag: SP, MS, E/R, PDU type
+ * @seglen: segment length in network byte order
+ * @cksum_msb: checksum - most significant byte
+ * @cksum_lsb: checksum - least significant byte
  * @dest_len: destination address length indicator
  * @dest_addr: destination address
  * @src_len: source address length indicator
  * @src_addr: source address
+ * @next_part: either the optional segmentation part, the optional options part,
+ *             or the payload
  */
 struct clnphdr {
-	__u8 cnf_proto_id;
-	__u8 cnf_hdr_len;
-	__u8 cnf_vers;
-	__u8 cnf_ttl;
-	__u8 cnf_flag;
-	__be16 cnf_seglen;
-	__u8 cnf_cksum_msb;
-	__u8 cnf_cksum_lsb;
+	__u8 nlpid;
+	__u8 hdrlen;
+	__u8 vers;
+	__u8 ttl;
+	__u8 flag;
+	__be16 seglen;
+	__u8 cksum_msb;
+	__u8 cksum_lsb;
 	__u8 dest_len;
-	__u8 dest_addr[CLNP_ADDR_LEN];
+	__u8 dest_addr[NSAP_ADDR_LEN];
 	__u8 src_len;
-	__u8 src_addr[CLNP_ADDR_LEN];
+	__u8 src_addr[NSAP_ADDR_LEN];
+	__u8 next_part[0];
 } __attribute__ ((packed));
-
-/*
- * In CLNP header, each field begins at the following n-th octet:
- */
-#define IDX_PROTO_ID	0
-#define IDX_HDR_LEN	1
-#define IDX_VERS	2
-#define IDX_TTL		3
-#define IDX_FLAG	4
-#define IDX_SEGLEN_MSB	5
-#define IDX_SEGLEN_LSB	6
-#define	IDX_CKSUM_MSB	7
-#define IDX_CKSUM_LSB	8
-#define IDX_DEST_LEN	9
-#define IDX_DEST_ADDR	10
-#define IDX_SRC_LEN	30
-#define IDX_SRC_ADDR	31
-#define IDX_NEXT_HDR	51
 
 /**
  * struct clnp_segment
- * @cng_id: data unit identifier
- * @cng_off: segment offset
- * @cng_tot_len: total length
+ * @id: data unit identifier in network byte order
+ * @off: segment offset in network byte order
+ * @tot_len: total length in network byte order
+ * @next_part: either the optional options part or the payload
  */
 struct clnp_segment {
-	__be16 cng_id;
-	__be16 cng_off;
-	__be16 cng_tot_len;
+	__be16 id;
+	__be16 off;
+	__be16 tot_len;
+	__u8 next_part[0];
 };
 
 /**
- * struct clnp_options
- * @cno_code: parameter code
- * @cno_len: parameter length
- * @cno_value: parameter value
+ * struct clnp_options - describes a parameter in the options part of a CLNP hdr
+ * @code: parameter code
+ * @len: parameter length
+ * @value: parameter value
  */
 struct clnp_options {
-	__u8 cno_code;
-	__u8 cno_len;
-	unsigned char *cno_value;
+	__u8 code;
+	__u8 len;
+	__u8 value[0];
 };
 
 /**
- * struct clnp_frag
- * @cfr_first: offset of the first byte of this fragment
- * @cfr_last: offset of the last byte of this fragment
- * @data: pointer to the data part of this fragment
- * @cfr_next: pointer to the next fragment in the list
- *
- * This structure contains the offset of the first and last byte of
- * the fragment as well as a pointer to the data (an mbuf chain) of the
- * fragment.
- */
-struct clnp_frag {
-	unsigned int cfr_first;
-	unsigned int cfr_last;
-	__u8 *data;
-	struct clnp_frag *cfr_next;
-};
-
-/**
- * struct clnp_fragl - CLNP fragment reassembly structure
+ * struct clnp_fragment_list - CLNP fragment reassembly structure
+ * @list: pointer to next packet being reassembled
  * @id: data unit identifier
  * @dstaddr: destination address of the packet
  * @srcaddr: source address of the packet
- * @cfl_ttl: current TTL of the packet
- * @cfl_last: offset of the last byte of the packet
- * @complete: indicator if the fragl is complete
- * @cfl_orihdr: pointer to the original header of the packet
- * @cfl_next: pointer to next packet being reassembled
- * @cfl_frags: linked list of fragments for packet
- * @cfl timer: reassembly timer for this list
+ * @curlen: indicator if the fragl is complete
+ * @totlen: pointer to the original header of the packet
+ * @status:
+ * @fragments: linked list of fragments for packet
+ * @timer: reassembly timer for this list
  *
  * All packets being reassembled are linked together as a linked list of
- * clnp_fragl structure. Each clnp_fragl structure contains a pointer to the
- * original CLNP packet header as well as a list of packet fragments. Each
- * clnp_fragl also structure contains a linked list of clnp_fragl structures.
+ * clnp_fragment_list structure. Each clnp_fragment_list structure contains a
+ * pointer a linked-list of sk_buff structure containing the fragments that make
+ * up the packet that the clnp_fragment_list structure represents.
  */
-struct clnp_fragl {
+struct clnp_fragment_list {
+	struct hlist_node list;
 	__u16 id;
-	__u8 dstaddr[CLNP_ADDR_LEN];
-	__u8 srcaddr[CLNP_ADDR_LEN];
-	__u8 cfl_ttl;
-	__u16 cfl_last;
-	__u8 complete;
-	struct sk_buff *cfl_orihdr;
-	struct clnp_fragl *cfl_next;
-	struct clnp_frag *cfl_frags;
+	__u8 dest_addr[NSAP_ADDR_LEN];
+	__u8 src_addr[NSAP_ADDR_LEN];
+	__u16 curlen;
+	__u16 totlen;
+	__u8 status;
+#define COMPLETE	4
+#define FIRST_IN	2
+#define LAST_IN		1
+
+	struct sk_buff *fragments;
 	struct timer_list timer;
 };
 
