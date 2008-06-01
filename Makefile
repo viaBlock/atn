@@ -6,7 +6,7 @@ KERNEL_SRC := /lib/modules/$(KVERSION)/build
 modules:
 	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) modules
 
-modules_install:
+modules_install: modules
 	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) modules_install
 
 clean:
