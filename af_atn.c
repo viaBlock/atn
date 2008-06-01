@@ -396,8 +396,8 @@ static int atn_sendmsg(struct kiocb *iocb, struct socket *sock
 	total_header_len = dev->hard_header_len + p8022_datalink->header_length
 								 + CLNP_FIX_LEN;
 
-	rc = -EINVAL;
-	if (len > ETH_DATA_LEN - total_header_len) {
+	rc = -EMSGSIZE;
+	if (len > ETH_FRAME_LEN - total_header_len) {
 		goto out_dev;
 	}
 
