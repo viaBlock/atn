@@ -92,11 +92,13 @@ struct sockaddr_atn {
 ================================== Copy Here ==================================
 
 5. Make sure you are in the directory containing the source code.
-   Type `make' to build `atn.ko'.
-   Later, type `make clean' to clean up every generated files.
+   Execute `make' to build `atn.ko'.
+   You can opt to execute `make modules_install' instead so that the resulting
+   `atn.ko' will be put in your system.
+   Later, execute `make clean' to clean up every generated files.
 
 6. Make sure that `register_8022_client' and `unregister_8022_client' symbols
-   can be found in your Linux kernel. To do so, type:
+   can be found in your Linux kernel. To do so, execute:
    `cat /proc/kallsyms | grep register_8022_client'. If those two symbols are
    returned, you can continue to the next step. Otherwise, you have to build one
    of the following Linux kernel components either as a module or built-in into
@@ -110,5 +112,6 @@ struct sockaddr_atn {
                                                     -> Token Ring driver support
 
 7. Make sure you are in the directory containing the source code.
-   Type `insmod atn.ko' to insert the module.
-   Later, type `rmmod atn' to remove the module.
+   If you executed `make modules_install', execute `modprobe atn.ko' to insert
+   the module. Otherwise, execute `insmod atn.ko'.
+   Later, execute `rmmod atn' to remove the module.
