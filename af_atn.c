@@ -39,6 +39,7 @@
  *		of the License, or (at your option) any later version.
  */
 
+#include <linux/version.h>
 #include <asm/errno.h>
 #include <asm/types.h>
 #include <linux/atn.h>
@@ -75,14 +76,12 @@ static __always_inline struct atn_sock *atn_sk(struct sock *sk)
 static int atn_rcv(struct sk_buff *skb, struct net_device *dev
 			 , struct packet_type *pt, struct net_device *orig_dev);
 static struct sock *lookup_clnp_sk_list(__u8 *nsap);
-static int atn_create(struct socket *sock, int protocol);
+static int atn_create(struct net *net, struct socket *sock, int protocol, int kern);
 static int atn_release(struct socket *sock);
 static int atn_bind(struct socket *sock, struct sockaddr *saddr, int len);
-static int atn_recvmsg(struct kiocb *iocb, struct socket *sock
-				  , struct msghdr *msg, size_t size, int flags);
-static int atn_sendmsg(struct kiocb *iocb, struct socket *sock
-					      , struct msghdr *msg, size_t len);
-static struct net_device *get_dev_out(char *ha);
+static int atn_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags);
+static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len);
+static struct net_device *get_dev_out(struct net *net, char *ha);
 static void compose_clnphdr(struct sk_buff *skb, __u8 *dst_addr, __u8 *src_addr);
 
 /* Private Global Variables */
@@ -108,7 +107,9 @@ static struct proto_ops atn_sockraw_ops = {
 	, .getname = sock_no_getname
 	, .socketpair = sock_no_socketpair
 	, .accept = sock_no_accept
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0)
 	, .poll = sock_no_poll
+#endif
 	, .ioctl = sock_no_ioctl
 	, .listen = sock_no_listen
 	, .shutdown = sock_no_shutdown
@@ -154,8 +155,8 @@ static void __exit cleanup_atn(void)
 }
 module_exit(cleanup_atn);
 
-static int atn_rcv(struct sk_buff *skb, struct net_device *dev
-			  , struct packet_type *pt, struct net_device *orig_dev)
+static int atn_rcv(struct sk_buff *skb, struct net_device *dev,
+			struct packet_type *pt, struct net_device *orig_dev)
 {
 	int rc = 0;
 	struct clnphdr *clnph = NULL;
@@ -200,12 +201,11 @@ out:
 
 static struct sock *lookup_clnp_sk_list(__u8 *nsap)
 {
-	struct hlist_node *node = NULL;
 	struct sock *sk = NULL;
 	struct sock *result = NULL;
 
 	read_lock(&clnp_sk_list_lock);
-	sk_for_each(sk, node, &clnp_sk_list) {
+	sk_for_each(sk, &clnp_sk_list) {
 		struct atn_sock *atns = atn_sk(sk);
 
 		if (cmp_nsap(nsap, atns->nsap.s_addr)) {
@@ -219,7 +219,7 @@ static struct sock *lookup_clnp_sk_list(__u8 *nsap)
 	return result;
 }
 
-static int atn_create(struct socket *sock, int protocol)
+static int atn_create(struct net *net, struct socket *sock, int protocol, int kern)
 {
 	struct sock *sk = NULL;
 
@@ -231,7 +231,7 @@ static int atn_create(struct socket *sock, int protocol)
 		return -EPROTONOSUPPORT;
 	}
 
-	sk = sk_alloc(PF_ATN, GFP_KERNEL, &atn_proto, 1);
+	sk = sk_alloc(net, PF_ATN, GFP_KERNEL, &atn_proto, kern);
 	if (!sk) {
 		return -ENOMEM;
 	}
@@ -249,7 +249,6 @@ static int atn_create(struct socket *sock, int protocol)
 static int atn_release(struct socket *sock)
 {
 	struct sock *sk_in_list = NULL;
-	struct hlist_node *node = NULL;
 	struct sock *sk = sock->sk;
 
 	if (!sk) {
@@ -259,7 +258,7 @@ static int atn_release(struct socket *sock)
 	sock->sk = NULL;
 
 	write_lock_bh(&clnp_sk_list_lock);
-	sk_for_each(sk_in_list, node, &clnp_sk_list) {
+	sk_for_each(sk_in_list, &clnp_sk_list) {
 		if (sk_in_list == sk) {
 			sock_put(sk_in_list);
 			__sk_del_node(sk_in_list);
@@ -280,7 +279,6 @@ static int atn_bind(struct socket *sock, struct sockaddr *saddr, int saddr_len)
 	struct sock *sk = sock->sk;
 	struct atn_sock *atns = atn_sk(sk);
 	struct sockaddr_atn *addr = (struct sockaddr_atn *)saddr;
-	struct hlist_node *node = NULL;
 	int rc = -EINVAL;
 
 	if (!sock_flag(sk, SOCK_ZAPPED) || saddr_len != sizeof(
@@ -290,7 +288,7 @@ static int atn_bind(struct socket *sock, struct sockaddr *saddr, int saddr_len)
 
 	rc = -EADDRINUSE;
 	write_lock_bh(&clnp_sk_list_lock);
-	sk_for_each(sk_in_list, node, &clnp_sk_list) {
+	sk_for_each(sk_in_list, &clnp_sk_list) {
 		struct atn_sock *atns_in_list = atn_sk(sk_in_list);
 
 		if (atns == atns_in_list) {
@@ -314,8 +312,7 @@ out:
 	return rc;
 }
 
-static int atn_recvmsg(struct kiocb *iocb, struct socket *sock
-				   , struct msghdr *msg, size_t size, int flags)
+static int atn_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
 	struct sockaddr_atn *satn = (struct sockaddr_atn *) msg->msg_name;
@@ -342,20 +339,17 @@ static int atn_recvmsg(struct kiocb *iocb, struct socket *sock
 		msg->msg_flags |= MSG_TRUNC;
 	}
 
-	rc = skb_copy_datagram_iovec(skb, clnph->hdrlen, msg->msg_iov, copied);
+	rc = skb_copy_datagram_msg(skb, clnph->hdrlen, msg, copied);
 	if (rc) {
 		goto out_free;
 	}
-	if (skb->tstamp.off_sec) {
-		skb_get_timestamp(skb, &sk->sk_stamp);
-	}
+	sock_recv_timestamp(msg, sk, skb);
 
 	msg->msg_namelen = sizeof(*satn);
 
 	if (satn) {
 		satn->satn_family = AF_ATN;
-		memcpy(&satn->satn_addr.s_addr, clnph->src_addr, clnph->src_len)
-									       ;
+		memcpy(&satn->satn_addr.s_addr, clnph->src_addr, clnph->src_len);
 		memcpy(satn->satn_mac_addr, eth_hdr(skb)->h_source, ETH_ALEN);
 	}
 	rc = copied;
@@ -366,15 +360,13 @@ out:
 	return rc;
 }
 
-static int atn_sendmsg(struct kiocb *iocb, struct socket *sock
-					       , struct msghdr *msg, size_t len)
+static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 {
 	struct sock *sk = sock->sk;
 	struct atn_sock *atns = atn_sk(sk);
-	struct sockaddr_atn *usatn = (struct sockaddr_atn *) msg->msg_name;
+	DECLARE_SOCKADDR(struct sockaddr_atn *, usatn, msg->msg_name);
 	int rc = -ENOTCONN;
 	int flags = msg->msg_flags;
-	struct iovec *iov = msg->msg_iov;
 	struct sk_buff *skb;
 	struct net_device *dev;
 	int total_header_len = 0;
@@ -389,7 +381,7 @@ static int atn_sendmsg(struct kiocb *iocb, struct socket *sock
 	}
 
 	rc = -ENODEV;
-	dev = get_dev_out(atns->snpa);
+	dev = get_dev_out(NULL, atns->snpa);
 	if (!dev) {
 		goto out;
 	}
@@ -412,7 +404,7 @@ static int atn_sendmsg(struct kiocb *iocb, struct socket *sock
 
 	skb->sk = sk;
 
-	rc = memcpy_fromiovec(skb_put(skb, len), iov, len);
+	rc = memcpy_from_msg(skb_put(skb, len), msg, len);
 	if (rc) {
 		kfree_skb(skb);
 		goto out_dev;
@@ -437,7 +429,7 @@ out_dev:
 	goto out;
 }
 
-static struct net_device *get_dev_out(char *ha)
+static struct net_device *get_dev_out(struct net *net, char *ha)
 {
 	struct net_device *dev;
 	int i;
@@ -449,7 +441,7 @@ static struct net_device *get_dev_out(char *ha)
 	}
 	if (i == ETH_ALEN) {
 		rtnl_lock();
-		dev = &loopback_dev;
+		dev = net->loopback_dev;
 		dev_hold(dev);
 		rtnl_unlock();
 
@@ -457,7 +449,7 @@ static struct net_device *get_dev_out(char *ha)
 	}
 
 	rtnl_lock();
-	dev = dev_getbyhwaddr(ARPHRD_ETHER, ha);
+	dev = dev_getbyhwaddr_rcu(net, ARPHRD_ETHER, ha);
 	if (dev) {
 		dev_hold(dev);
 	}
@@ -470,7 +462,8 @@ static void compose_clnphdr(struct sk_buff *skb, __u8 *dst_addr, __u8 *src_addr)
 {
 	struct clnphdr *clnph;
 
-	skb->h.raw = skb_push(skb, CLNP_FIX_LEN);
+	skb_set_transport_header(skb, CLNP_FIX_LEN);
+	skb_push(skb, CLNP_FIX_LEN);
 	clnph = clnp_hdr(skb);
 
 	clnph->nlpid = CLNP_NLPID;

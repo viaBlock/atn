@@ -208,7 +208,7 @@ extern void clnp_frag_expires(unsigned long data);
  */
 static __always_inline struct clnphdr *clnp_hdr(struct sk_buff *skb)
 {
-	return (struct clnphdr *) skb->h.raw;
+	return (struct clnphdr *) skb_transport_header(skb);
 }
 
 /**
