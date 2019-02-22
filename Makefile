@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0
+
 .PHONY: modules modules_install clean
 
 KVERSION := $(shell uname -r)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * clnp_util.c	Functions that are used together inside CLNP module
  *

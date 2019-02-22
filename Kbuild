@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0
+
 obj-m := atn.o
 
 atn-objs := af_atn.o clnp_csum.o

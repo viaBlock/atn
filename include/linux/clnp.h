@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 /*
  * ATN		An implementation of the CLNP/TP4 protocol suite for the LINUX
  *		operating system.  ATN is implemented using the  BSD Socket
