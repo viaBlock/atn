@@ -3,7 +3,7 @@
 .PHONY: modules modules_install clean
 
 KVERSION := $(shell uname -r)
-KERNEL_SRC := /lib/modules/$(KVERSION)/build
+KERNEL_SRC ?= /lib/modules/$(KVERSION)/build
 
 modules:
 	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) modules
