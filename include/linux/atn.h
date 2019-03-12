@@ -23,12 +23,28 @@
 #ifndef _LINUX_ATN_H_
 #define _LINUX_ATN_H_ 1
 
-#include <linux/clnp.h>
-#include <linux/if_ether.h>
 #include <linux/socket.h>
-#include <net/sock.h>
+#include <linux/if.h>
+#include <linux/if_ether.h>
 
-#define ATN_HTABLE_SIZE 256
+#define AF_ATN   AF_IPX
+#define PF_ATN   PF_IPX
+
+/*
+ * Various values for the fixed part of a CLNP header
+ */
+#define CLNP_VERSION	1	/* CLNP version */
+#define CLNP_NLPID	0x81	/* CLNP network layer protocol ID */
+#define INAC_NLPID	0x00	/* inactive network layer protocol ID */
+#define CLNP_MAXTTL	255	/* maximum time-to-live */
+#define CLNP_TTL_UNITS	2	/* 500 miliseconds */
+#define CLNP_FIX_LEN	51	/* the minimum length of a CLNP header */
+#define CLNP_HDR_MAX	254	/* the maximum length of a CLNP header */
+
+#define NSAP_ADDR_LEN	20	/* the length of the address value */
+
+//TODO: make sure to use correct LLC_PDU
+#define CLNP_MTU         (ETH_DATA_LEN - CLNP_HDR_MAX - 4)
 
 struct atn_addr {
 	__u8 s_addr[NSAP_ADDR_LEN];
@@ -37,14 +53,7 @@ struct atn_addr {
 struct sockaddr_atn {
 	sa_family_t	satn_family;
 	struct atn_addr	satn_addr;
-	unsigned char	satn_mac_addr[ETH_ALEN];
-};
-
-struct atn_sock {
-	/* struct sock has to be the first member of atn_sock */
-	struct sock	sk;
-	struct atn_addr nsap;
-	unsigned char	snpa[ETH_ALEN];
+	unsigned char	satn_mac_addr[IFHWADDRLEN];
 };
 
 #endif

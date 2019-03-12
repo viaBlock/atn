@@ -95,18 +95,11 @@
 #include <linux/skbuff.h>
 #include <linux/timer.h>
 #include <linux/types.h>
+#include <net/sock.h>
 
-/*
- * Various values for the fixed part of a CLNP header
- */
-#define CLNP_VERSION	1	/* CLNP version */
-#define CLNP_NLPID	0x81	/* CLNP network layer protocol ID */
-#define INAC_NLPID	0x00	/* inactive network layer protocol ID */
-#define CLNP_MAXTTL	255	/* maximum time-to-live */
-#define CLNP_TTL_UNITS	2	/* 500 miliseconds */
-#define CLNP_FIX_LEN	51	/* the minimum length of a CLNP header */
-#define CLNP_HDR_MAX	254	/* the maximum length of a CLNP header */
-#define NSAP_ADDR_LEN	20	/* the length of the address value */
+#include <linux/atn.h>
+
+#define ATN_HTABLE_SIZE 256
 
 /*
  * Various values for the segmentation part of a CLNP header
@@ -341,6 +334,13 @@ struct clnp_fragment_list {
 
 	struct sk_buff *fragments;
 	struct timer_list timer;
+};
+
+struct atn_sock {
+	/* struct sock has to be the first member of atn_sock */
+	struct sock	sk;
+	struct atn_addr nsap;
+	unsigned char	snpa[IFHWADDRLEN];
 };
 
 #endif /* _LINUX_CLNP_H */

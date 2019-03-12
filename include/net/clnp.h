@@ -38,9 +38,6 @@
 #include <linux/skbuff.h>
 #include <net/datalink.h>
 
-#define AF_ATN   AF_IPX
-#define PF_ATN   PF_IPX
-
 /*
  * Functions provided by af_atn.c
  */
