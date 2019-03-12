@@ -227,17 +227,9 @@ static __always_inline __u8 clnp_decrease_ttl(struct clnphdr *clnph)
 /**
  * cmp_nsap - returns true if @nsap1 == @nsap2 or false if @nsap1 != @nsap2
  */
-static __always_inline int cmp_nsap(__u8 *nsap1, __u8 *nsap2)
+static __always_inline int cmp_nsap(const __u8 *nsap1, const __u8 *nsap2)
 {
-	int i = NSAP_ADDR_LEN;
-
-	while (--i >= 0) {
-		if (nsap1 [i] != nsap2 [i]) {
-			return false;
-		}
-	}
-
-	return true;
+	return memcmp(nsap1, nsap2, NSAP_ADDR_LEN) == 0;
 }
 
 /**
