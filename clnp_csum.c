@@ -72,11 +72,10 @@ void clnp_gen_csum(struct clnphdr *clnph)
 	int y = 0;
 	int hdr_idx = 0;
 	int hdr_len = clnph->hdrlen;
-	__u8 *ptr = (__u8 *) clnph;
+	__u8 *ptr = (__u8 *)clnph;
 
-	clnph->cksum_msb = clnph->cksum_lsb = 0;
-	c0 = 0;
-	c1 = 0;
+	clnph->cksum_msb = 0;
+	clnph->cksum_lsb = 0;
 
 	for (hdr_idx = 0; hdr_idx < hdr_len; hdr_idx++) {
 		c0 += ptr[hdr_idx];
@@ -84,21 +83,18 @@ void clnp_gen_csum(struct clnphdr *clnph)
 	}
 
 	x = ((hdr_len - 8) * c0 - c1) % 255;
-	if (x < 0) {
+	if (x < 0)
 		x += 255;
-	}
 
 	y = ((hdr_len - 7) * (-c0) + c1) % 255;
-	if (y < 0) {
+	if (y < 0)
 		y += 255;
-	}
 
-	if (x == 0) {
+	if (x == 0)
 		x = 255;
-	}
-	if (y == 0) {
+
+	if (y == 0)
 		y = 255;
-	}
 
 	clnph->cksum_msb = x;
 	clnph->cksum_lsb = y;
@@ -118,19 +114,17 @@ static int clnp_check_csum_field(struct clnphdr *clnph)
 	int hdr_idx = 0;
 	int hdr_len = clnph->hdrlen;
 	int rc = 0;
-	__u8 *ptr = (__u8 *) clnph;
+	__u8 *ptr = (__u8 *)clnph;
 	__u8 cksum_msb = clnph->cksum_msb;
 	__u8 cksum_lsb = clnph->cksum_lsb;
 
-	if ((cksum_lsb == 0) && (cksum_msb == 0)) {
+	if (cksum_lsb == 0 && cksum_msb == 0) {
 		rc = 0;
-	} else if ((cksum_lsb == 0) && (cksum_msb != 0)) {
+	} else if (cksum_lsb == 0 && cksum_msb != 0) {
 		rc = -GEN_BADCSUM;
-	} else if ((cksum_lsb != 0) && (cksum_msb == 0)) {
+	} else if (cksum_lsb != 0 && cksum_msb == 0) {
 		rc = -GEN_BADCSUM;
 	} else {
-		c0 = c1 = 0;
-		x = y = 0;
 		for (hdr_idx = 0; hdr_idx < hdr_len; hdr_idx++) {
 			c0 = (c0 + ptr[hdr_idx]);
 			c1 = (c1 + c0);
@@ -139,11 +133,10 @@ static int clnp_check_csum_field(struct clnphdr *clnph)
 		x = c0 % 255;
 		y = c1 % 255;
 
-		if (x || y) {
+		if (x || y)
 			rc = -GEN_BADCSUM;
-		} else {
+		else
 			rc = 0;
-		}
 	}
 
 	return rc;
@@ -154,9 +147,8 @@ int clnp_check_csum(struct clnphdr *clnph)
 	__u8 cksum_msb = 0;
 	__u8 cksum_lsb = 0;
 
-	if (clnp_check_csum_field(clnph)) {
+	if (clnp_check_csum_field(clnph))
 		return -GEN_BADCSUM;
-	}
 
 	cksum_msb = clnph->cksum_msb;
 	cksum_lsb = clnph->cksum_lsb;
@@ -186,21 +178,18 @@ int clnp_adjust_csum(struct clnphdr *clnph, int idx_changed, __u8 new_value
 	 */
 	if (x != 0 && y != 0) {
 		x = ((idx_changed - idx_cksum_msb - 1) * z + x) % 255;
-		if (x < 0) {
+		if (x < 0)
 			x += 255;
-		}
 
 		y = ((idx_cksum_msb - idx_changed) * z + y) % 255;
-		if (y < 0) {
+		if (y < 0)
 			y += 255;
-		}
 
-		if (x == 0) {
+		if (x == 0)
 			x = 255;
-		}
-		if (y == 0) {
+
+		if (y == 0)
 			y = 255;
-		}
 
 		clnph->cksum_msb = x;
 		clnph->cksum_lsb = y;

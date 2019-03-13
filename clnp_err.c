@@ -64,32 +64,7 @@
 #include <linux/string.h>
 #include <net/clnp.h>
 
-/* Private Function Prototypes */
-static void clnp_emit_er(struct sk_buff *skb, __u8 reason, __u8 location
-							      , gfp_t gfp_mask);
-
-/*
- * clnp_discard() shall only perform sanity check on @skb to decide whether to
- * actually send back an error report PDU by invoking clnp_emit_er() or not
- */
-int clnp_discard(struct sk_buff *skb, __u8 reason, __u8 location
-							       , gfp_t gfp_mask)
-{
-	struct clnphdr *clnph = NULL;
-
-	skb = skb_clone(skb, gfp_mask);
-	clnph = clnp_hdr(skb);
-
-	if ((clnph->flag & TYPE_MASK != CLNP_ER) && (clnph->flag & ER_MASK)) {
-		return clnp_emit_er(skb, reason, location, gfp_mask);
-	} else {
-		kfree_skb(skb);
-	}
-
-	return 0;
-}
-
-static int clnp_emit_er (struct sk_buff *skb, __u8 reason, __u8 location
+static int clnp_emit_er(struct sk_buff *skb, __u8 reason, __u8 location
 							       , gfp_t gfp_mask)
 {
 	struct net_device *dev_out = skb->dev;
@@ -138,7 +113,7 @@ static int clnp_emit_er (struct sk_buff *skb, __u8 reason, __u8 location
 	memcpy(skb_put(skb, clnph_hdrlen), clnph, clnph_hdrlen);
 
 	/* loading the CLNP ER header */
-	err_clnph = (struct clnphdr *) skb_push(err, err_hdrlen);
+	err_clnph = (struct clnphdr *)skb_push(err, err_hdrlen);
 
 	err_clnph->nlpid = CLNP_NLPID;
 	err_clnph->hdrlen = err_hdrlen;
@@ -153,12 +128,10 @@ static int clnp_emit_er (struct sk_buff *skb, __u8 reason, __u8 location
 	err_clnph->src_len = NSAP_ADDR_LEN;
 	/* Woi! */ error get_nsap_addr(err_clnph->src_addr);
 
-	if (clnph_opt_len) {
+	if (clnph_opt_len)
 		memcpy(err_clnph->next_part, clnph_opt, clnph_opt_len);
-	}
 
-	reason_for_discard = (struct clnp_options *) (err_clnph->next_part
-							       + clnph_opt_len);
+	reason_for_discard = (struct clnp_options *)(err_clnph->next_part + clnph_opt_len);
 	reason_for_discard->code = REASON_DISCARD;
 	reason_for_discard->len = 2;
 	reason_for_discard->value[0] = reason;
@@ -169,3 +142,23 @@ static int clnp_emit_er (struct sk_buff *skb, __u8 reason, __u8 location
 	/* send the CLNP ER out */
 	return atn_xmit(skb);
 }
+
+/*
+ * clnp_discard() shall only perform sanity check on @skb to decide whether to
+ * actually send back an error report PDU by invoking clnp_emit_er() or not
+ */
+int clnp_discard(struct sk_buff *skb, __u8 reason, __u8 location, gfp_t gfp_mask)
+{
+	struct clnphdr *clnph = NULL;
+
+	skb = skb_clone(skb, gfp_mask);
+	clnph = clnp_hdr(skb);
+
+	if ((clnph->flag & TYPE_MASK != CLNP_ER) && (clnph->flag & ER_MASK))
+		return clnp_emit_er(skb, reason, location, gfp_mask);
+
+	kfree_skb(skb);
+
+	return 0;
+}
+

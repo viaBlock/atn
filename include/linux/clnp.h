@@ -9,15 +9,15 @@
  * Version:
  *
  * Authors:	Pradana Atmadiputra <pradana.priyono@student.sgu.ac.id>
- * 		Melvin Rubianto <melvin.rubianto@student.sgu.ac.id>
- * 		Danny Laidi <danny.laidi@student.sgu.ac.id>
- * 		Bunga Sugiarto <bunga.sugiarto@student.sgu.ac.id>
+ *		Melvin Rubianto <melvin.rubianto@student.sgu.ac.id>
+ *		Danny Laidi <danny.laidi@student.sgu.ac.id>
+ *		Bunga Sugiarto <bunga.sugiarto@student.sgu.ac.id>
  *		Tadeus Prastowo <eus@member.fsf.org>
  *
  * Changes (oldest at the top, newest at the bottom):
  *		Pradana:	* Define clnp_fixed, clnp_segment, and
  *				clnp_address structure
- *  		Melvin:		* Define parameter type and parameter value for
+ *		Melvin:		* Define parameter type and parameter value for
  *				the option part of CLNP
  *		Danny:		* Define the extra variables (FIXED_LEN,
  *				ADDR_LEN, SEG_LEN, etc.)
@@ -25,8 +25,8 @@
  *				fixed part (CLNPVERSION, NLPID, MAXTTL)
  *		Danny:		* Define mask for CLNP Flag Fields
  *		Danny:		* Define CLNP packet types
- * 		Danny:		* Define CLNP option structure
- *    		Bunga:		* Define CLNP error codes
+ *		Danny:		* Define CLNP option structure
+ *		Bunga:		* Define CLNP error codes
  *		Bunga:		* Define CLNP header structure
  *		Bunga:		* Add big and little endian condition inside
  *				clnp_fixed
@@ -134,17 +134,19 @@
  * Read the comment as (field name: semantic of the value)
  */
 #define AFI 0x2F		/* authority and format identifier: ISO 6523 ICD
-				 * IDI and binary DSP format
-				 */
-#define IDI_1 0x00		/* 1st byte initial domain identifier:
-#define IDI_2 0x1B		 * 2nd byte initial domain identifier:
-				 *				ATN NSAP address
-				 */
-#define VER_G_AINSC 0x01	/* version:	ground AINSC NSAP address
-#define VER_M_AINSC 0x41	 * 		mobile AINSC NSAP address
-#define VER_G_ATSC 0x81		 * 		ground ATSC NSAP address
-#define VER_M_ATSC 0xC1		 * 		mobile ATSC NSAP address
-				 */
+						 * IDI and binary DSP format
+						 */
+
+#define IDI_1 0x00		/* 1st byte initial domain identifier: */
+#define IDI_2 0x1B		/* 2nd byte initial domain identifier:
+						 *	ATN NSAP address
+						 */
+/* version: */
+#define VER_G_AINSC 0x01	/* ground AINSC NSAP address */
+#define VER_M_AINSC 0x41	/* mobile AINSC NSAP address */
+#define VER_G_ATSC 0x81		/* ground ATSC NSAP address */
+#define VER_M_ATSC 0xC1		/* mobile ATSC NSAP address */
+
 #define RDF 0x00		/* routing domain format: unassigned */
 
 /*
@@ -181,7 +183,7 @@
 
 /* Parameter value for Recording of Route Option -- if code equals to 0xCB
  */
-#define ROR_PARTIAL 0x00 	/* partial recording of route in progress */
+#define ROR_PARTIAL 0x00	/* partial recording of route in progress */
 #define ROR_COMPLETE 0x01	/* complete recording of route in progress */
 #define ROR_PARTIAL_TS 0x02	/* partial recording of route in progress
 				 * (with timestamps)
@@ -275,7 +277,7 @@ struct clnphdr {
 	__u8 src_len;
 	__u8 src_addr[NSAP_ADDR_LEN];
 	__u8 next_part[0];
-} __attribute__ ((packed));
+} __packed;
 
 /**
  * struct clnp_segment

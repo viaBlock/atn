@@ -92,7 +92,6 @@
  */
 
 #include <asm/types.h>
-#include <linux/byteorder/generic.h>
 #include <linux/clnp.h>
 #include <linux/kernel.h>
 #include <linux/netdevice.h>
@@ -123,38 +122,38 @@ static __always_inline int opt_part_hndlr(struct clnp_options *opt)
 {
 	switch (opt->code) {
 	case CLNPOPT_PC_PAD:
-		printk(KERN_INFO "Option: padding\n");
+		pr_info("Option: padding\n");
 		break;
 	case CLNPOPT_PC_SEC:
-		printk(KERN_INFO "Option: security\n");
+		pr_info("Option: security\n");
 		break;
 	case CLNPOPT_PC_SRCROUTE:
-		printk(KERN_INFO "Option: source routeing\n");
+		pr_info("Option: source routeing\n");
 		break;
 	case CLNPOPT_PC_ROR:
-		printk(KERN_INFO "Option: recording of route\n");
+		pr_info("Option: recording of route\n");
 		break;
 	case CLNPOPT_PC_QOS:
-		printk(KERN_INFO "Option: quality of service maintenance\n");
+		pr_info("Option: quality of service maintenance\n");
 		break;
 	case CLNPOPT_PC_PRIOR:
-		printk(KERN_INFO "Option: priority\n");
+		pr_info("Option: priority\n");
 		break;
 	case CLNPOPT_PC_PBSC:
-		printk(KERN_INFO "Option: prefix based scope control\n");
+		pr_info("Option: prefix based scope control\n");
 		break;
 	case CLNPOPT_PC_RSC:
-		printk(KERN_INFO "Option: radius scope control\n");
+		pr_info("Option: radius scope control\n");
 		break;
 	default:
-		printk(KERN_INFO "Option: unknown parameter\n");
+		pr_info("Option: unknown parameter\n");
 		return -1;
 	}
 
 	return 0;
 }
 
-int clnp_addr_ck (struct clnphdr * clnph)
+int clnp_addr_ck(struct clnphdr *clnph)
 {
 	return (clnph->dest_len == 20 && clnph->src_len == 20);
 }
@@ -165,10 +164,6 @@ int clnp_rcv(struct sk_buff *skb, struct net_device *dev,
 	struct clnphdr *clnph = NULL;
 	int clnph_hdrlen = 0;
 	int pdu_size = 0;
-	int sp_flag = 0;
-	int ms_flag = 0;
-	int er_flag = 0;
-	int type_flag = 0;
 	int err_location = 0;
 	int rc = 0;
 
@@ -182,23 +177,27 @@ int clnp_rcv(struct sk_buff *skb, struct net_device *dev,
 	/* check the completeness of the datagram */
 	pdu_size = ntohs(clnph->seglen);
 	if (skb->len < pdu_size) {
+		pr_err_ratelimited("skb len %d is less than PDU %d\n", skb->len, pdu_size);
 		goto discard_incomplete;
 	}
 
 	/* check the network layer protocol ID */
 	if (clnph->nlpid != CLNP_NLPID) {
+		pr_err_ratelimited("CLNP header has invalid nlpid %d, should be %d\n", clnph->nlpid, CLNP_NLPID);
 		rc = -NLPID_ERROR;
 		goto drop;
 	}
 
 	/* check the version */
 	if (clnph->vers != CLNP_VERSION) {
+		pr_err_ratelimited("CLNP header has invalid version %d, should be %d\n", clnph->vers, CLNP_VERSION);
 		goto discard_unsupported_vers;
 	}
 
 	/* check the checksum */
 	if (clnph->cksum_lsb + clnph->cksum_msb != 0) {
-		if (clnp_check_csum(skb, clnph->hdrlen) != 1) {
+		if (clnp_check_csum(skb) != 1) {
+			pr_err_ratelimited("CLNP header checksum incorrect\n");
 			err_location = 0;
 			goto discard_bad_csum;
 		}
@@ -206,12 +205,14 @@ int clnp_rcv(struct sk_buff *skb, struct net_device *dev,
 
 	/* check the lifetime (discard if the TTL is zero) */
 	if (clnph->ttl == 0) {
+		pr_err_ratelimited("TTL is 0\n");
 		goto discard_syntax_error;
 	}
 
 	/* check the value range of the header */
 	clnph_hdrlen = clnph->hdrlen;
 	if (clnph_hdrlen < MIN_HDR_LEN || clnph_hdrlen > MAX_HDR_LEN) {
+		pr_err_ratelimited("CLNP header size invalid: %d\n", clnph_hdrlen);
 		goto discard_syntax_error;
 	}
 
@@ -237,33 +238,29 @@ int clnp_rcv(struct sk_buff *skb, struct net_device *dev,
 	 * Segmentation part
 	 */
 	if (sp_flag) {
-		struct clnp_segment *seg =
-					 (struct clnp_segment) clnph->next_part;
+		struct clnp_segment *seg = (struct clnp_segment*)clnph->next_part;
 
 		/*
-			* Check whether the packet type is an Error Report PDU.
-			* If yes, it's an error because an Error Report PDU
-			* packet may not have any segmentation part.
-			*/
+		 * Check whether the packet type is an Error Report PDU.
+		 * If yes, it's an error because an Error Report PDU
+		 * packet may not have any segmentation part.
+		 */
 		if (type_flag == CLNP_ER) {
-			printk(KERN_INFO "Error: an ER PDU may not have"
-						" any segmentation part\n");
+			pr_err_ratelimited("an ER PDU may not have any segmentation part\n");
 			goto discard_syntax_error;
 		}
 
-		printk(KERN_INFO "Analyzing the segmentation part:\n");
+		pr_info("Analyzing the segmentation part:\n");
 
 		/* print the value of the segmentation part */
 		print_header_segment(seg);
 
 		/* check the segmentation offset */
-		printk(KERN_INFO "Check segmentation offset value: ");
+		pr_info("Check segmentation offset value: ");
 		if (ntohs(seg->off) % 8 == 0) {
-			printk(KERN_INFO "Segmentation offset is"
-						" correct (multiple of 8)\n");
+			pr_info("Segmentation offset is correct (multiple of 8)\n");
 		} else {
-			printk(KERN_INFO "Segmentation offset error"
-						" (not multiple of 8)\n");
+			pr_err("Segmentation offset error (not multiple of 8)\n");
 			goto discard_syntax_error;
 		}
 	}
@@ -280,35 +277,36 @@ int clnp_rcv(struct sk_buff *skb, struct net_device *dev,
 	return 0;
 
 discard_bad_csum:
-	clnp_discard(skb, GEN_BADCSUM, err_location);
+	clnp_discard(skb, GEN_BADCSUM, err_location, GFP_KERNEL);
 	return -GEN_BADCSUM;
 
 discard_syntax_error:
-	clnp_discard(skb, GEN_HDRSYNTAX, err_location);
+	clnp_discard(skb, GEN_HDRSYNTAX, err_location, GFP_KERNEL);
 	return -GEN_HDRSYNTAX;
 
 discard_unknown_type:
-	clnp_discard(skb, GEN_UNKNOWN, err_location);
+	clnp_discard(skb, GEN_UNKNOWN, err_location, GFP_KERNEL);
 	return -GEN_UNKNOWN;
 
 discard_incomplete:
-	clnp_discard(skb, GEN_INCOMPLETE, err_location);
+	clnp_discard(skb, GEN_INCOMPLETE, err_location, GFP_KERNEL);
 	return -GEN_INCOMPLETE;
 
 discard_unsupported_vers:
-	clnp_discard(skb, DISC_UNSUPPVERS, err_location);
+	clnp_discard(skb, DISC_UNSUPPVERS, err_location, GFP_KERNEL);
 	return -DISC_UNSUPPVERS;
 drop:
 	kfree_skb(skb);
 	return rc;
 }
 
-void clnp_rcv_finish(struct sk_buff *skb)
-{, struct clnphdr *clnph,
-			     struct clnp_segment *seg, int fas_len, int sp_flag,
-					int ms_flag, int er_flag, int type_flag
-	struct clnphdr *clnph_skb = clnp_hdr(skb);
+void clnp_rcv_finish(struct sk_buff *skb, struct clnphdr *clnph
+			    , struct clnp_segment *seg, int fas_len, int sp_flag
+				     , int ms_flag, int er_flag, int type_flag)
+{
 	__u8 our_addr[NSAP_ADDR_LEN] = {0}; /* address part's variable */
+
+	struct clnphdr *clnph_skb = clnp_hdr(skb);
 
 	/* options part's variables */
 	int opt_idx = 0;
@@ -326,22 +324,19 @@ void clnp_rcv_finish(struct sk_buff *skb)
 	if (clnph->hdrlen > fas_len) {
 		struct clnp_options *opt;
 
-		printk(KERN_INFO "Analyzing the parameter of the options"
-								  " part...\n");
+		pr_info("Analyzing the parameter of the options part...\n");
 		opt_idx = fas_len; /* starting index of the options part */
 		while (opt_idx < clnph->hdrlen) {
-			opt = (struct clnp_options *) (clnph_skb + opt_idx);
+			opt = (struct clnp_options *)(clnph_skb + opt_idx);
 
 			/* print the value of the parameter */
 			print_header_options(opt);
 
 			if (opt->code == REASON_DISCARD) {
 				if (type_flag == CLNP_ER) {
-					printk(KERN_INFO "This is reason for"
-								  " discard\n");
+					pr_info("This is reason for discard\n");
 				} else {
-					printk(KERN_INFO "Error in reason for"
-								  " discard\n");
+					pr_info("Error in reason for discard\n");
 					goto discard_syntax_error;
 				}
 
@@ -349,19 +344,17 @@ void clnp_rcv_finish(struct sk_buff *skb)
 				opt_idx += REASON_LEN;
 			} else {
 				if (opt_part_hndlr(opt) == -1)
-				{
 					goto discard_syntax_error;
-				}
+
 				count++; /* how many parts are there? */
 
 				/* fetch the next parameter */
 				opt_idx += (opt->len + 2);
 			}
 		}
-		printk(KERN_INFO "Found %d parameter(s) in the options part\n"
-								       , count);
+		pr_info("Found %d parameter(s) in the options part\n", count);
 	} else {
-		printk(KERN_INFO "No parameter exists in the options part\n");
+		pr_info("No parameter exists in the options part\n");
 	}
 
 	/*
@@ -370,32 +363,33 @@ void clnp_rcv_finish(struct sk_buff *skb)
 	get_nsap_addr(our_addr);
 
 	/* check the address length value */
-	printk(KERN_INFO "Checking the addresses' length... ");
+	pr_info("Checking the addresses' length... ");
 	if (clnp_addr_ck(clnph) == 1) {
-		printk(KERN_INFO "No error in address length (value = 20)\n");
+		pr_info("No error in address length (value = 20)\n");
 	} else {
-		printk(KERN_INFO "Error address length (value != 20)\n");
+		pr_info("Error address length (value != 20)\n");
 		goto discard_syntax_error;
 	}
 
 	if (is_our_dgram(clnph, our_addr) == 1) {
-		printk(KERN_INFO "Status: The packet is ours\n");
+		pr_info("Status: The packet is ours\n");
 		clnp_local_deliver(skb, clnph, seg, ms_flag);
-		return;
-	} else {
-		printk(KERN_INFO "Status: The packet is not ours\n");
-		printk(KERN_INFO "Call the forwarding function\n");
 		return;
 	}
 
+	pr_info("Status: The packet is not ours\n");
+	pr_info("Call the forwarding function\n");
+
+	return;
+
 discard_syntax_error:
-	clnp_discard(skb, GEN_HDRSYNTAX);
+	clnp_discard(skb, GEN_HDRSYNTAX, 0, GFP_KERNEL);
 }
 
 int is_our_dgram(struct clnphdr *clnph, __u8 *my_addr)
 {
-	if (clnph->dest_len == NSAP_ADDR_LEN
-		 && (memcmp(my_addr, clnph->dest_addr, clnph->dest_len) == 0)) {
+	if (clnph->dest_len == NSAP_ADDR_LEN &&
+		(memcmp(my_addr, clnph->dest_addr, clnph->dest_len) == 0)) {
 		return 1;
 	} else {
 		return 0;
@@ -405,16 +399,12 @@ int is_our_dgram(struct clnphdr *clnph, __u8 *my_addr)
 void clnp_local_deliver(struct sk_buff *skb, struct clnphdr *clnph,
 					  struct clnp_segment *seg, int ms_flag)
 {
-	if (seg) {
-		if (ms_flag || ntohs(seg->off) != 0) {
-			printk(KERN_INFO "Defragmenting packet...\n");
-			skb = (struct sk_buff *) clnp_defrag(skb
-							, clnph->dest_addr
-							, clnph->src_addr, seg);
-			if (!skb) {
-				return;
-			}
-		}
+	if (seg && (ms_flag || ntohs(seg->off) != 0)) {
+		pr_info("Defragmenting packet...\n");
+		//skb = clnp_defrag(skb, clnph->dest_addr, clnph->src_addr, seg);
+		skb = clnp_defrag(skb);
+		if (!skb)
+			return;
 	}
 	clnp_local_deliver_finish(skb);
 }
@@ -422,5 +412,5 @@ void clnp_local_deliver(struct sk_buff *skb, struct clnphdr *clnph,
 void clnp_local_deliver_finish(struct sk_buff *skb)
 {
 	skb_pull(skb, clnp_hdr(skb)->hdrlen);
-	printk(KERN_INFO "Packet is now passed to the transport layer\n");
+	pr_info("Packet is now passed to the transport layer\n");
 }

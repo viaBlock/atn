@@ -57,7 +57,7 @@ void get_nsap_addr(__u8 *addr) __attribute__ ((nonnull));
  *
  * The pointer of skb->h.raw points to the skb->data
  */
-extern void clnp_local_deliver_finish(struct sk_buff *skb);
+void clnp_local_deliver_finish(struct sk_buff *skb);
 
 /**
  * clnp_local_deliver
@@ -65,7 +65,7 @@ extern void clnp_local_deliver_finish(struct sk_buff *skb);
  * Reassemblies the segmented PDUs if needed and then they are passed to the
  * transport layer. The reassembly function is called only if it is needed.
  */
-extern void clnp_local_deliver(struct sk_buff *skb, struct clnphdr *clnph
+void clnp_local_deliver(struct sk_buff *skb, struct clnphdr *clnph
 				       , struct clnp_segment *seg, int ms_flag);
 
 /**
@@ -74,10 +74,9 @@ extern void clnp_local_deliver(struct sk_buff *skb, struct clnphdr *clnph
  * Print error messages and call clnp_discard function if there is any error
  * detected. Analyze whether to call local delivery or source routing function.
  */
-extern void clnp_rcv_finish(struct sk_buff *skb, struct clnphdr *clnph
+void clnp_rcv_finish(struct sk_buff *skb, struct clnphdr *clnph
 			    , struct clnp_segment *seg, int fas_len, int sp_flag
 				     , int ms_flag, int er_flag, int type_flag);
-
 
 /**
  * clnp_rcv - performs sanity check on the datagram
@@ -87,7 +86,7 @@ extern void clnp_rcv_finish(struct sk_buff *skb, struct clnphdr *clnph
  * Return -REASON if any error is detected (REASON is one of those listed on
  * include/linux/clnp.h under PDU error codes).
  */
-extern int clnp_rcv(struct sk_buff *skb, struct net_device *dev
+int clnp_rcv(struct sk_buff *skb, struct net_device *dev
 			 , struct packet_type *pt, struct net_device *orig_dev);
 
 /**
@@ -96,7 +95,7 @@ extern int clnp_rcv(struct sk_buff *skb, struct net_device *dev
  * Return 1 if the address is the same (i.e., the packet is for us).
  * Return 0 if the address is different (i.e., the packet is not for us).
  */
-extern int is_our_dgram(struct clnphdr *clnph, __u8 *my_addr);
+int is_our_dgram(struct clnphdr *clnph, __u8 *my_addr);
 
 /**
  * clnp_addr_ck - checks the lengths of the destination and source addresses
@@ -104,7 +103,7 @@ extern int is_our_dgram(struct clnphdr *clnph, __u8 *my_addr);
  * Return 1 if each of the lengths is exactly 20.
  * Return 0 if not all of the lengths is exactly 20.
  */
-extern int clnp_addr_ck (struct clnphdr *clnph);
+int clnp_addr_ck(struct clnphdr *clnph);
 
 /*
  * Functions provided by clnp_csum.c
@@ -117,7 +116,7 @@ extern int clnp_addr_ck (struct clnphdr *clnph);
  * This function calculates the checksum over the whole length of the specified
  * @clnph.
  */
-extern void clnp_gen_csum(struct clnphdr *clnph);
+void clnp_gen_csum(struct clnphdr *clnph);
 
 /**
  * clnp_check_csum - performs an error detection on a CLNP header
@@ -126,7 +125,7 @@ extern void clnp_gen_csum(struct clnphdr *clnph);
  * Return 0 if checksum calculation succeed (no error detected).
  * Return -GEN_BADCSUM if checksum calculation failed (error detected).
  */
-extern int clnp_check_csum(struct clnphdr *clnph);
+int clnp_check_csum(struct clnphdr *clnph);
 
 /**
  * clnp_adjust_csum - adjusts the checksum parameter when an octet is altered
@@ -139,7 +138,7 @@ extern int clnp_check_csum(struct clnphdr *clnph);
  * Return 0 if the existing @clnph has correct checksum.
  * Return -GEN_BADCSUM if the existing @clnph has incorrect checksum.
  */
-extern int clnp_adjust_csum(struct clnphdr *clnph, int idx_changed
+int clnp_adjust_csum(struct clnphdr *clnph, int idx_changed
 					      , __u8 new_value, __u8 old_value);
 
 /*
@@ -155,8 +154,7 @@ extern int clnp_adjust_csum(struct clnphdr *clnph, int idx_changed
  *
  * If this function is called from an interrupt @gfp_mask must be %GFP_ATOMIC.
  */
-extern int clnp_discard(struct sk_buff *skb, __u8 reason, __u8 location
-							      , gfp_t gfp_mask);
+int clnp_discard(struct sk_buff *skb, __u8 reason, __u8 location, gfp_t gfp_mask);
 
 /*
  * Functions provided by clnp_fragment.c
@@ -168,18 +166,18 @@ extern int clnp_discard(struct sk_buff *skb, __u8 reason, __u8 location
  * Return NULL if the datagram contained in @skb is segmented and the datagram
  * is not the last fragment to complete the whole initial datagram.
  */
-extern struct sk_buff *clnp_defrag(struct sk_buff *skb);
+struct sk_buff *clnp_defrag(struct sk_buff *skb);
 
 /**
  * clnp_comp_frag - inserts a segment into its place overcoming overlap
  */
-extern void clnp_insert_frag(struct clnp_fragment_list *cfl, struct sk_buff *skb
+void clnp_insert_frag(struct clnp_fragment_list *cfl, struct sk_buff *skb
 						    , struct clnp_segment *seg);
 
 /**
  * clnp_comp_frag - checks whether all segments have been received completely
  */
-extern struct sk_buff *clnp_comp_frag(struct clnp_fragment_list *cfh
+struct sk_buff *clnp_comp_frag(struct clnp_fragment_list *cfh
 						       , unsigned short totlen);
 
 /**
@@ -189,12 +187,12 @@ extern struct sk_buff *clnp_comp_frag(struct clnp_fragment_list *cfh
  * This function is called after all the segments have been reconstructed or
  * when the timer has expired.
  */
-extern void clnp_frag_destroy(struct clnp_fragment_list *cfh);
+void clnp_frag_destroy(struct clnp_fragment_list *cfh);
 
 /**
  * clnp_frag_expires - called when the reassembly timer expired
  */
-extern void clnp_frag_expires(unsigned long data);
+void clnp_frag_expires(unsigned long data);
 
 /*
  * Functions provided by clnp_util.c
@@ -205,7 +203,7 @@ extern void clnp_frag_expires(unsigned long data);
  */
 static __always_inline struct clnphdr *clnp_hdr(struct sk_buff *skb)
 {
-	return (struct clnphdr *) skb_transport_header(skb);
+	return (struct clnphdr *)skb_transport_header(skb);
 }
 
 /**
@@ -242,5 +240,9 @@ static __always_inline int atn_skb_headroom(struct net_device *dev)
 
 	return LL_RESERVED_SPACE_EXTRA(dev, p8022_datalink->header_length);
 }
+
+void print_header_clnp(struct clnphdr *clnph);
+void print_header_options(struct clnp_options *opt);
+void print_header_segment(struct clnp_segment *seg);
 
 #endif /* _NET_CLNP_H */

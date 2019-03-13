@@ -43,7 +43,7 @@
 
 #define NSAP_ADDR_LEN	20	/* the length of the address value */
 
-//TODO: make sure to use correct LLC_PDU
+/* TODO: make sure to use correct LLC_PDU */
 #define CLNP_MTU         (ETH_DATA_LEN - CLNP_HDR_MAX - 4)
 
 struct atn_addr {

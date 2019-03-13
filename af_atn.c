@@ -42,6 +42,7 @@
 #include <linux/version.h>
 #include <asm/errno.h>
 #include <asm/types.h>
+
 #include <linux/atn.h>
 #include <linux/clnp.h>
 #include <linux/ctype.h>
@@ -57,6 +58,8 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/byteorder/generic.h>
+#include <linux/etherdevice.h>
+
 #include <net/clnp.h>
 #include <net/datalink.h>
 #include <net/p8022.h>
@@ -64,6 +67,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Cast of dozens");
+MODULE_AUTHOR("Anton Bondarenko");
 MODULE_DESCRIPTION("The ATN TP4/CLNP Networking Suite for GNU/Linux");
 MODULE_SUPPORTED_DEVICE("netdevice");
 
@@ -86,101 +90,82 @@ static void compose_clnphdr(struct sk_buff *skb, __u8 *dst_addr, __u8 *src_addr)
 
 /* Private Global Variables */
 static struct proto atn_proto = {
-	.name = "ATN"
-	, .owner = THIS_MODULE
-	, .obj_size = sizeof(struct atn_sock)
+	.name = "ATN",
+	.owner = THIS_MODULE,
+	.obj_size = sizeof(struct atn_sock),
 };
+
 static struct net_proto_family atn_family_ops = {
-	.family = PF_ATN
-	, .create = atn_create
-	, .owner = THIS_MODULE
+	.family = PF_ATN,
+	.create = atn_create,
+	.owner = THIS_MODULE,
 };
+
 static struct proto_ops atn_sockraw_ops = {
-	.family = PF_ATN
-	, .owner = THIS_MODULE
-	, .release = atn_release
-	, .recvmsg = atn_recvmsg
-	, .sendmsg = atn_sendmsg
-	, .bind = atn_bind
-
-	, .connect = sock_no_connect
-	, .getname = sock_no_getname
-	, .socketpair = sock_no_socketpair
-	, .accept = sock_no_accept
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0)
-	, .poll = sock_no_poll
+	.family = PF_ATN,
+	.owner = THIS_MODULE,
+	.release = atn_release,
+	.recvmsg = atn_recvmsg,
+	.sendmsg = atn_sendmsg,
+	.bind = atn_bind,
+	.connect = sock_no_connect,
+	.getname = sock_no_getname,
+	.socketpair = sock_no_socketpair,
+	.accept = sock_no_accept,
+#if KERNEL_VERSION(4, 18, 0) > LINUX_VERSION_CODE
+	.poll = sock_no_poll,
 #endif
-	, .ioctl = sock_no_ioctl
-	, .listen = sock_no_listen
-	, .shutdown = sock_no_shutdown
-	, .setsockopt = sock_no_setsockopt
-	, .getsockopt = sock_no_getsockopt
-	, .mmap = sock_no_mmap
-	, .sendpage = sock_no_sendpage
+	.ioctl = sock_no_ioctl,
+	.listen = sock_no_listen,
+	.shutdown = sock_no_shutdown,
+	.setsockopt = sock_no_setsockopt,
+	.getsockopt = sock_no_getsockopt,
+	.mmap = sock_no_mmap,
+	.sendpage = sock_no_sendpage,
+#ifdef CONFIG_COMPAT
+	.compat_setsockopt = sock_no_setsockopt,
+	.compat_getsockopt = sock_no_getsockopt,
+#endif
 };
-struct datalink_proto *p8022_datalink = NULL;
-static unsigned char atn_8022_type = 0xFE; /* ISO Network Layer */
-static char atn_llc_err_msg[] __initdata =
-			       KERN_CRIT "ATN: Unable to register with 802.2\n";
 
-static struct hlist_head clnp_sk_list;
-DEFINE_RWLOCK(clnp_sk_list_lock);
+struct datalink_proto *p8022_datalink;
+static const unsigned char atn_8022_type = 0xFE; /* ISO Network Layer */
 
-static int __init init_atn(void)
-{
-	rwlock_init(&clnp_sk_list_lock);
-
-	proto_register(&atn_proto, 1);
-	sock_register(&atn_family_ops);
-
-	p8022_datalink = register_8022_client(atn_8022_type, atn_rcv);
-	if (!p8022_datalink) {
-		printk(atn_llc_err_msg);
-		return -1;
-	}
-
-	return 0;
-}
-module_init(init_atn);
-
-static void __exit cleanup_atn(void)
-{
-	if (p8022_datalink) {
-		unregister_8022_client(p8022_datalink);
-		p8022_datalink = NULL;
-	}
-
-	sock_unregister(PF_ATN);
-	proto_unregister(&atn_proto);
-}
-module_exit(cleanup_atn);
+static HLIST_HEAD(clnp_sk_list);
+static DEFINE_RWLOCK(clnp_sk_list_lock);
 
 static int atn_rcv(struct sk_buff *skb, struct net_device *dev,
-			struct packet_type *pt, struct net_device *orig_dev)
+				   struct packet_type *pt, struct net_device *orig_dev)
 {
 	int rc = 0;
 	struct clnphdr *clnph = NULL;
 	struct sock *sk = NULL;
 
 	if (skb->pkt_type == PACKET_OTHERHOST) {
+		net_warn_ratelimited("%s: received packet for another host\n", __func__);
 		goto drop;
 	}
 
-	if ((skb = skb_share_check(skb, GFP_ATOMIC)) == NULL) {
+	skb = skb_share_check(skb, GFP_ATOMIC);
+	if (!skb) {
+		net_err_ratelimited("%s: couldn't clone skb\n", __func__);
 		goto out;
 	}
 
 	if (!pskb_may_pull(skb, sizeof(struct clnphdr))) {
+		net_err_ratelimited("%s: could not retrieve CLNP header\n", __func__);
 		goto drop;
 	}
 
 	clnph = clnp_hdr(skb);
 	if (!pskb_may_pull(skb, ntohs(clnph->seglen))) {
+		net_err_ratelimited("%s: could not retrieve CLNP seglen %d\n", __func__, ntohs(clnph->seglen));
 		goto drop;
 	}
 
 	sk = lookup_clnp_sk_list(clnph->dest_addr);
 	if (!sk) {
+		net_err_ratelimited("%s: could not find socket in the list for dest\n", __func__);
 		goto drop;
 	}
 
@@ -188,6 +173,7 @@ static int atn_rcv(struct sk_buff *skb, struct net_device *dev,
 	sock_put(sk);
 
 	if (rc < 0) {
+		net_err_ratelimited("%s: could not queue received skb, error %d\n", __func__, rc);
 		goto drop;
 	}
 
@@ -224,15 +210,18 @@ static int atn_create(struct net *net, struct socket *sock, int protocol, int ke
 	struct sock *sk = NULL;
 
 	if (sock->type != SOCK_RAW) {
+		pr_err("%s: only RAW socket type supported\n", __func__);
 		return -ESOCKTNOSUPPORT;
 	}
 
 	if (protocol != 0) {
+		pr_err("%s: only protocol 0 supported\n", __func__);
 		return -EPROTONOSUPPORT;
 	}
 
 	sk = sk_alloc(net, PF_ATN, GFP_KERNEL, &atn_proto, kern);
 	if (!sk) {
+		pr_err("%s: couldn't allocate sock\n", __func__);
 		return -ENOMEM;
 	}
 
@@ -252,6 +241,7 @@ static int atn_release(struct socket *sock)
 	struct sock *sk = sock->sk;
 
 	if (!sk) {
+		pr_warn("%s: nothing to release\n", __func__);
 		return 0;
 	}
 
@@ -281,8 +271,9 @@ static int atn_bind(struct socket *sock, struct sockaddr *saddr, int saddr_len)
 	struct sockaddr_atn *addr = (struct sockaddr_atn *)saddr;
 	int rc = -EINVAL;
 
-	if (!sock_flag(sk, SOCK_ZAPPED) || saddr_len != sizeof(
-							 struct sockaddr_atn)) {
+	if (!sock_flag(sk, SOCK_ZAPPED) || saddr_len != sizeof(*addr)) {
+		pr_err("%s: could not bind socket, SOCK_ZAPPED=%d, addr_len=%d\n",
+			   __func__, sock_flag(sk, SOCK_ZAPPED), saddr_len);
 		goto out;
 	}
 
@@ -291,18 +282,17 @@ static int atn_bind(struct socket *sock, struct sockaddr *saddr, int saddr_len)
 	sk_for_each(sk_in_list, &clnp_sk_list) {
 		struct atn_sock *atns_in_list = atn_sk(sk_in_list);
 
-		if (atns == atns_in_list) {
+		if (atns == atns_in_list)
 			continue;
-		}
 
-		if (cmp_nsap(atns_in_list->nsap.s_addr, addr->satn_addr.s_addr))
-		{
+		if (cmp_nsap(atns_in_list->nsap.s_addr, addr->satn_addr.s_addr)) {
+			pr_err("%s: address in use\n", __func__);
 			write_unlock_bh(&clnp_sk_list_lock);
 			goto out;
 		}
 	}
 	memcpy(atns->nsap.s_addr, addr->satn_addr.s_addr, NSAP_ADDR_LEN);
-	memcpy(atns->snpa, addr->satn_mac_addr, ETH_ALEN);
+	ether_addr_copy(atns->snpa, addr->satn_mac_addr);
 	write_unlock_bh(&clnp_sk_list_lock);
 
 	sock_reset_flag(sk, SOCK_ZAPPED);
@@ -315,7 +305,7 @@ out:
 static int atn_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags)
 {
 	struct sock *sk = sock->sk;
-	struct sockaddr_atn *satn = (struct sockaddr_atn *) msg->msg_name;
+	struct sockaddr_atn *satn = (struct sockaddr_atn *)msg->msg_name;
 	struct clnphdr *clnph = NULL;
 	struct sk_buff *skb;
 	int copied;
@@ -323,12 +313,13 @@ static int atn_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int
 
 	rc = -ENOTCONN;
 	if (sock_flag(sk, SOCK_ZAPPED)) {
+		net_err_ratelimited("%s: socket not bind\n", __func__);
 		goto out;
 	}
 
-	skb = skb_recv_datagram(sk, flags & ~MSG_DONTWAIT, flags & MSG_DONTWAIT
-									 , &rc);
+	skb = skb_recv_datagram(sk, flags & ~MSG_DONTWAIT, flags & MSG_DONTWAIT, &rc);
 	if (!skb) {
+		net_err_ratelimited("%s: couldn't receive\n", __func__);
 		goto out;
 	}
 
@@ -341,6 +332,7 @@ static int atn_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int
 
 	rc = skb_copy_datagram_msg(skb, clnph->hdrlen, msg, copied);
 	if (rc) {
+		net_err_ratelimited("%s: couldn't copy datagram data\n", __func__);
 		goto out_free;
 	}
 	sock_recv_timestamp(msg, sk, skb);
@@ -372,17 +364,20 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 	int total_header_len = 0;
 
 	if (sock_flag(sk, SOCK_ZAPPED)) {
+		net_err_ratelimited("%s: socket not bind\n", __func__);
 		goto out;
 	}
 
 	rc = -EINVAL;
-	if (flags & ~(MSG_DONTWAIT|MSG_CMSG_COMPAT)) {
+	if (flags & ~(MSG_DONTWAIT | MSG_CMSG_COMPAT)) {
+		net_err_ratelimited("%s: socket not bind\n", __func__);
 		goto out;
 	}
 
 	rc = -ENODEV;
 	dev = get_dev_out(NULL, atns->snpa);
 	if (!dev) {
+		net_err_ratelimited("%s: could not get network dev to send over\n", __func__);
 		goto out;
 	}
 
@@ -391,13 +386,16 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 
 	rc = -EMSGSIZE;
 	if (len > ETH_FRAME_LEN - total_header_len) {
+		net_err_ratelimited("%s: not space for data, required %lu, available %d\n",
+							__func__, len, ETH_FRAME_LEN - total_header_len);
 		goto out_dev;
 	}
 
 	rc = -ENOMEM;
-	skb = sock_alloc_send_skb(sk, NET_IP_ALIGN + total_header_len + len
-						   , flags & MSG_DONTWAIT, &rc);
+	skb = sock_alloc_send_skb(sk, NET_IP_ALIGN + total_header_len + len, flags & MSG_DONTWAIT, &rc);
 	if (!skb) {
+		net_err_ratelimited("%s: couldn't allocate skb, size %lu\n",
+							__func__, NET_IP_ALIGN + total_header_len + len);
 		goto out_dev;
 	}
 	skb_reserve(skb, NET_IP_ALIGN + total_header_len);
@@ -406,6 +404,8 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 
 	rc = memcpy_from_msg(skb_put(skb, len), msg, len);
 	if (rc) {
+		net_err_ratelimited("%s: couldn't copy msg of size %lu, error %d\n",
+							__func__, len, rc);
 		kfree_skb(skb);
 		goto out_dev;
 	}
@@ -417,9 +417,10 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 
 	rc = p8022_datalink->request(p8022_datalink, skb, usatn->satn_mac_addr);
 
-	if (rc >= 0) {
+	if (rc >= 0)
 		rc = len;
-	}
+	else
+		net_err_ratelimited("%s: P802.2 request failed, error %d\n", __func__, rc);
 
 out:
 	return rc;
@@ -435,9 +436,8 @@ static struct net_device *get_dev_out(struct net *net, char *ha)
 	int i;
 
 	for (i = 0; i < ETH_ALEN; i++) {
-		if (ha[i] != 0) {
+		if (ha[i] != 0)
 			break;
-		}
 	}
 	if (i == ETH_ALEN) {
 		rtnl_lock();
@@ -450,9 +450,8 @@ static struct net_device *get_dev_out(struct net *net, char *ha)
 
 	rtnl_lock();
 	dev = dev_getbyhwaddr_rcu(net, ARPHRD_ETHER, ha);
-	if (dev) {
+	if (dev)
 		dev_hold(dev);
-	}
 	rtnl_unlock();
 
 	return dev;
@@ -472,9 +471,56 @@ static void compose_clnphdr(struct sk_buff *skb, __u8 *dst_addr, __u8 *src_addr)
 	clnph->ttl = 40;
 	clnph->flag = set_clnp_flag(0, 0, 1, CLNP_DT);
 	clnph->seglen = htons(skb->len);
-	clnph->dest_len = clnph->src_len = NSAP_ADDR_LEN;
+	clnph->src_len = NSAP_ADDR_LEN;
+	clnph->dest_len = NSAP_ADDR_LEN;
 	memcpy(clnph->dest_addr, dst_addr, NSAP_ADDR_LEN);
 	memcpy(clnph->src_addr, src_addr, NSAP_ADDR_LEN);
 
 	clnp_gen_csum(clnph);
 }
+
+static int __init init_atn(void)
+{
+	int err = -1;
+
+	rwlock_init(&clnp_sk_list_lock);
+
+	do {
+		err = proto_register(&atn_proto, 1);
+		if (err) {
+			pr_err("%s: couldn't register ATN protocol, error %d\n", __func__, err);
+			break;
+		}
+
+		err = sock_register(&atn_family_ops);
+		if (err) {
+			pr_err("%s: couldn't register ATN socket, error %d\n", __func__, err);
+			proto_unregister(&atn_proto);
+			break;
+		}
+
+		p8022_datalink = register_8022_client(atn_8022_type, atn_rcv);
+		if (!p8022_datalink) {
+			pr_crit("%s: Unable to register with 802.2\n", __func__);
+			sock_unregister(PF_ATN);
+			proto_unregister(&atn_proto);
+			err = -EFAULT;
+			break;
+		}
+	} while (0);
+
+	return err;
+}
+module_init(init_atn);
+
+static void __exit cleanup_atn(void)
+{
+	if (p8022_datalink) {
+		unregister_8022_client(p8022_datalink);
+		p8022_datalink = NULL;
+	}
+
+	sock_unregister(PF_ATN);
+	proto_unregister(&atn_proto);
+}
+module_exit(cleanup_atn);
