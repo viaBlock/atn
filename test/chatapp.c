@@ -35,7 +35,7 @@ static int server;
 static int is_atn = 1;
 static int is_raw = 1;
 
-static int msglen = MAXSIZE;
+static ssize_t msglen = MAXSIZE;
 static uint8_t msg[MAXSIZE];
 
 static void handle_error(const char* msg) {
@@ -381,14 +381,14 @@ int main(int argc, char *argv[]) {
             if (msg_size < 0) {
                 handle_error("error from recvfrom");
             }
-            printf("RECEIVED %d bytes:\n", msg_size);
+            printf("RECEIVED %ld bytes:\n", msg_size);
             print_hex_dump_bytes("", 2, msg, msg_size);
 
             msg_size = sendto(sockfd, msg, msg_size, 0, remote_addr, remote_addr_len);
             if (msg_size < 0) {
                 handle_error("error from sendto");
             }
-            printf("SEND %d bytes:\n", msg_size);
+            printf("SEND %ld bytes:\n", msg_size);
         }
     } else {
         ssize_t msg_size;
@@ -398,10 +398,10 @@ int main(int argc, char *argv[]) {
         if (msg_size < 0) {
             handle_error("error from sendto");
         } else if (msg_size != msglen) {
-            printf ("REQUESTED:%d SENT:%d\n", msglen, msg_size);
+            printf ("REQUESTED:%ld SENT:%ld\n", msglen, msg_size);
             handle_error("NOT ALL DATA SENT");
         }
-        printf("SEND %d bytes:\n", msg_size);
+        printf("SEND %ld bytes:\n", msg_size);
         print_hex_dump_bytes("", 2, msg, msg_size);
 
         msg_received = malloc(MAXSIZE);
@@ -417,14 +417,14 @@ int main(int argc, char *argv[]) {
             handle_error("error from recvfrom");
         } else if (msg_size != msglen) {
             free(msg_received);
-            printf ("SENT:%d RECEIVED:%d\n", msglen, msg_size);
+            printf ("SENT:%ld RECEIVED:%ld\n", msglen, msg_size);
             handle_error("NOT ALL DATA RECEIVED");
         } else if (memcmp(msg_received, msg, msg_size) != 0) {
             printf("DATA MISMATCH BETWEEN SENT AND RECEIVED\n");
             print_hex_dump_bytes("", 2, msg_received, msg_size);
             handle_error("");
         }
-        printf("RECEIVED %d bytes:\n", msg_size);
+        printf("RECEIVED %ld bytes:\n", msg_size);
         print_hex_dump_bytes("", 2, msg, msg_size);
     }
 
