@@ -43,6 +43,9 @@ static void handle_error(const char* msg) {
     exit(EXIT_FAILURE);
 }
 
+static const uint8_t nsap_addr_prefix[] = { 47, 00, 27, 81, 47, 42, 52, 00, 00, 00, 00 };
+static const char nsap_prefix[] = "470027+8147425200000000";
+
 /**
  * hex_dump_to_buffer - convert a blob of data to "hex ASCII" in memory
  * @buf: data blob to dump
@@ -310,11 +313,23 @@ static void parse_opts(int argc, char *argv[])
 static int resolv_addr(const char* name, void* addr) {
     if (addr && name) {
         if (is_atn) {
-            //TODO: fix address resolution
+			int i;
             struct atn_addr* atn = addr;
+			if (strlen(name) != NSAP_ADDR_LEN * 2 + 1)
+				handle_error("incorrect NSAP address, exiting");
+			if (strncmp(name, nsap_prefix, sizeof(nsap_prefix) - 1) != 0)
+				handle_error("couldn't resolve NSAP address, exiting");
 
-            memcpy(atn->s_addr, name, sizeof(atn->s_addr));
-            handle_error("could not resolve ATN address");
+            memset(atn->s_addr, 0, sizeof(atn->s_addr));
+			memcpy(atn->s_addr, nsap_addr_prefix, sizeof(nsap_addr_prefix));
+			//resolve node address, last bytes are MAC address in fact
+			// first +1 is due to '+' in the address
+			for (i = sizeof(nsap_addr_prefix); i < NSAP_ADDR_LEN; ++i) {
+				atn->s_addr[i] = (name[i*2 + 1] << 8) | (name[i*2 + 1 + 1]);
+			}
+			printf("resolving NSAP address '%s', got binary:\n", name);
+			print_hex_dump("NSAP in BIN:", 1, sizeof(atn->s_addr), 1, atn->s_addr, sizeof(atn->s_addr), 0);
+			return 1;
         } else {
             return inet_aton(name, addr);
         }
@@ -348,10 +363,12 @@ int main(int argc, char *argv[]) {
 
         addr->satn_family = AF_ATN;
         resolv_addr(local, &addr->satn_addr);
+		memcpy(addr->satn_mac_addr, addr->satn_addr.s_addr + sizeof(nsap_addr_prefix) + 5, sizeof(addr->satn_mac_addr));
 
         addr = (struct sockaddr_atn*)remote_addr;
         addr->satn_family = AF_ATN;
         resolv_addr(remote, &addr->satn_addr);
+		memcpy(addr->satn_mac_addr, addr->satn_addr.s_addr + sizeof(nsap_addr_prefix) + 5, sizeof(addr->satn_mac_addr));
     } else {
         struct sockaddr_in* addr = (struct sockaddr_in*)local_addr;
 
