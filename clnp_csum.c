@@ -57,12 +57,8 @@
  */
 
 #include <asm/types.h>
-#include <linux/clnp.h>
 #include <linux/stddef.h>
 #include <net/clnp.h>
-
-/* Private Function Prototypes */
-static int clnp_check_csum_field(struct clnphdr *clnph);
 
 void clnp_gen_csum(struct clnphdr *clnph)
 {
