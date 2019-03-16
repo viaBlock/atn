@@ -85,8 +85,7 @@ static int atn_release(struct socket *sock);
 static int atn_bind(struct socket *sock, struct sockaddr *saddr, int len);
 static int atn_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags);
 static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len);
-static struct net_device *get_dev_out(struct net *net, char *ha);
-static void compose_clnphdr(struct sk_buff *skb, __u8 *dst_addr, __u8 *src_addr);
+static void atn_prepend_clnphdr(struct sk_buff *skb, u8 *dst_addr, u8 *src_addr);
 
 /* Private Global Variables */
 static struct proto atn_proto = {
@@ -134,6 +133,28 @@ static const unsigned char atn_8022_type = 0xFE; /* ISO Network Layer */
 static HLIST_HEAD(clnp_sk_list);
 static DEFINE_RWLOCK(clnp_sk_list_lock);
 
+static struct net_device *atn_get_dev_out(struct net *net, u8 *ha)
+{
+	struct net_device *dev;
+
+	if (is_zero_ether_addr(ha)) {
+		rtnl_lock();
+		dev = net->loopback_dev;
+		dev_hold(dev);
+		rtnl_unlock();
+
+		return dev;
+	}
+
+	rtnl_lock();
+	dev = dev_getbyhwaddr_rcu(net, ARPHRD_ETHER, ha);
+	if (dev)
+		dev_hold(dev);
+	rtnl_unlock();
+
+	return dev;
+}
+
 static int atn_rcv(struct sk_buff *skb, struct net_device *dev,
 				   struct packet_type *pt, struct net_device *orig_dev)
 {
@@ -152,14 +173,16 @@ static int atn_rcv(struct sk_buff *skb, struct net_device *dev,
 		goto out;
 	}
 
-	if (!pskb_may_pull(skb, sizeof(struct clnphdr))) {
+	if (!pskb_may_pull(skb, CLNP_FIX_LEN)) {
 		net_err_ratelimited("%s: could not retrieve CLNP header\n", __func__);
 		goto drop;
 	}
+	skb_reset_transport_header(skb);
 
 	clnph = clnp_hdr(skb);
-	if (!pskb_may_pull(skb, ntohs(clnph->seglen))) {
-		net_err_ratelimited("%s: could not retrieve CLNP seglen %d\n", __func__, ntohs(clnph->seglen));
+
+	if (skb->len != ntohs(clnph->seglen)) {
+		net_err_ratelimited("%s: could not retrieve CLNP seglen %d, skb->len=%d\n", __func__, (int)ntohs(clnph->seglen), skb->len);
 		goto drop;
 	}
 
@@ -359,7 +382,7 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 	DECLARE_SOCKADDR(struct sockaddr_atn *, usatn, msg->msg_name);
 	int rc = -ENOTCONN;
 	int flags = msg->msg_flags;
-	struct sk_buff *skb;
+	struct sk_buff *skb = NULL;
 	struct net_device *dev;
 	int total_header_len = 0;
 
@@ -375,7 +398,7 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 	}
 
 	rc = -ENODEV;
-	dev = get_dev_out(NULL, atns->snpa);
+	dev = atn_get_dev_out(sock_net(sk), atns->snpa);
 	if (!dev) {
 		net_err_ratelimited("%s: could not get network dev to send over\n", __func__);
 		goto out;
@@ -394,10 +417,11 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 	rc = -ENOMEM;
 	skb = sock_alloc_send_skb(sk, NET_IP_ALIGN + total_header_len + len, flags & MSG_DONTWAIT, &rc);
 	if (!skb) {
-		net_err_ratelimited("%s: couldn't allocate skb, size %lu\n",
-							__func__, NET_IP_ALIGN + total_header_len + len);
+		net_err_ratelimited("%s: couldn't allocate skb, size %lu, error %d\n",
+							__func__, NET_IP_ALIGN + total_header_len + len, rc);
 		goto out_dev;
 	}
+	/* reserver memory for CLNP header + LLC header + dev hard header */
 	skb_reserve(skb, NET_IP_ALIGN + total_header_len);
 
 	skb->sk = sk;
@@ -406,63 +430,40 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 	if (rc) {
 		net_err_ratelimited("%s: couldn't copy msg of size %lu, error %d\n",
 							__func__, len, rc);
-		kfree_skb(skb);
 		goto out_dev;
 	}
 
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_802_2);
 
-	compose_clnphdr(skb, usatn->satn_addr.s_addr, atns->nsap.s_addr);
+	atn_prepend_clnphdr(skb, usatn->satn_addr.s_addr, atns->nsap.s_addr);
 
 	rc = p8022_datalink->request(p8022_datalink, skb, usatn->satn_mac_addr);
 
 	if (rc >= 0)
 		rc = len;
-	else
+	else {
 		net_err_ratelimited("%s: P802.2 request failed, error %d\n", __func__, rc);
+		goto out_dev;
+	}
 
 out:
 	return rc;
 
 out_dev:
+	if(skb)
+		kfree_skb(skb);
 	dev_put(dev);
 	goto out;
 }
 
-static struct net_device *get_dev_out(struct net *net, char *ha)
-{
-	struct net_device *dev;
-	int i;
-
-	for (i = 0; i < ETH_ALEN; i++) {
-		if (ha[i] != 0)
-			break;
-	}
-	if (i == ETH_ALEN) {
-		rtnl_lock();
-		dev = net->loopback_dev;
-		dev_hold(dev);
-		rtnl_unlock();
-
-		return dev;
-	}
-
-	rtnl_lock();
-	dev = dev_getbyhwaddr_rcu(net, ARPHRD_ETHER, ha);
-	if (dev)
-		dev_hold(dev);
-	rtnl_unlock();
-
-	return dev;
-}
-
-static void compose_clnphdr(struct sk_buff *skb, __u8 *dst_addr, __u8 *src_addr)
+static void atn_prepend_clnphdr(struct sk_buff *skb, u8 *dst_addr, u8 *src_addr)
 {
 	struct clnphdr *clnph;
 
-	skb_set_transport_header(skb, CLNP_FIX_LEN);
 	skb_push(skb, CLNP_FIX_LEN);
+	skb_reset_transport_header(skb);
+
 	clnph = clnp_hdr(skb);
 
 	clnph->nlpid = CLNP_NLPID;
