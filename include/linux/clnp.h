@@ -342,7 +342,7 @@ struct atn_sock {
 	/* struct sock has to be the first member of atn_sock */
 	struct sock	sk;
 	struct atn_addr nsap;
-	unsigned char	snpa[IFHWADDRLEN];
+	unsigned char snpa[ETH_ALEN];
 };
 
 #endif /* _LINUX_CLNP_H */

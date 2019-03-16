@@ -53,7 +53,7 @@ struct atn_addr {
 struct sockaddr_atn {
 	sa_family_t	satn_family;
 	struct atn_addr	satn_addr;
-	__u8 satn_mac_addr[IFHWADDRLEN];
+	__u8 satn_mac_addr[ETH_ALEN];
 };
 
 #endif

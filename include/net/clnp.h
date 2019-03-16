@@ -244,5 +244,6 @@ static __always_inline int atn_skb_headroom(struct net_device *dev)
 void print_header_clnp(struct clnphdr *clnph);
 void print_header_options(struct clnp_options *opt);
 void print_header_segment(struct clnp_segment *seg);
+void print_simple(const u8 *buf, const int len);
 
 #endif /* _NET_CLNP_H */

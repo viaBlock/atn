@@ -63,95 +63,92 @@
 #include <linux/kernel.h>
 #include <net/clnp.h>
 
+#define print_func   pr_err
+
 void print_header_clnp(struct clnphdr *clnph)
 {
-	int i = 0;
-
-	pr_info("Printing CLNP header:\n");
-	pr_info("Network Layer Protocol ID: 0x%02X\n", clnph->nlpid);
-	pr_info("Header length: %d\n", clnph->hdrlen);
-	pr_info("Version: %d\n", clnph->vers);
-	pr_info("Time-to-live: %d\n", clnph->ttl);
-	pr_info("Flags: SP: %d MS: %d ER: %d PDU type:",
+	print_func("Printing CLNP header:\n");
+	print_func("Network Layer Protocol ID: 0x%02X\n", clnph->nlpid);
+	print_func("Header length: %d\n", clnph->hdrlen);
+	print_func("Version: %d\n", clnph->vers);
+	print_func("Time-to-live: %d\n", clnph->ttl);
+	print_func("Flags: SP: %d MS: %d ER: %d PDU type:",
 		!!(clnph->flag & SP_MASK), !!(clnph->flag & MS_MASK), !!(clnph->flag & ER_MASK));
 
 	switch (clnph->flag & TYPE_MASK) {
 	case CLNP_DT:
-		pr_info("DT PDU (normal data)\n");
+		print_func("DT PDU (normal data)\n");
 		break;
 	case CLNP_MD:
-		pr_info("MD PDU (multicast data)\n");
+		print_func("MD PDU (multicast data)\n");
 		break;
 	case CLNP_ER:
-		pr_info("ER PDU (error report)\n");
+		print_func("ER PDU (error report)\n");
 		break;
 	case CLNP_ERQ:
-		pr_info("ERQ PDU (echo request)\n");
+		print_func("ERQ PDU (echo request)\n");
 		break;
 	case CLNP_ERP:
-		pr_info("ERP PDU (echo reply)\n");
+		print_func("ERP PDU (echo reply)\n");
 		break;
 	default:
-		pr_info("unknown\n");
+		print_func("unknown\n");
 	}
-	pr_info("Segmentation length: %d\n", ntohs(clnph->seglen));
-	pr_info("Checksum MSB: %d\n", clnph->cksum_msb);
-	pr_info("Checksum LSB: %d\n", clnph->cksum_lsb);
-	pr_info("Destination address length: %d\n", clnph->dest_len);
-	pr_info("Destination address: 0x");
-	for (i = 0; i < clnph->dest_len; i++)
-		pr_info("%02X%s", clnph->dest_addr[i], (i + 1 == clnph->dest_len) ? "\n" : " ");
-	pr_info("Source address length: %d\n", clnph->src_len);
-	pr_info("Source address: 0x");
-	for (i = 0; i < clnph->src_len; i++)
-		pr_info("%02X%s", clnph->src_addr[i], (i + 1 == clnph->src_len) ? "\n" : " ");
+	print_func("Segmentation length: %d\n", ntohs(clnph->seglen));
+	print_func("Checksum MSB: %d\n", clnph->cksum_msb);
+	print_func("Checksum LSB: %d\n", clnph->cksum_lsb);
+	print_func("Destination address length: %d\n", clnph->dest_len);
+	print_hex_dump(KERN_ERR, "Destination address:", DUMP_PREFIX_NONE, 32, 1,
+			clnph->dest_addr, clnph->dest_len, true);
+
+	print_func("Source address length: %d\n", clnph->src_len);
+	print_hex_dump(KERN_ERR, "Source address:", DUMP_PREFIX_NONE, 32, 1,
+			clnph->src_addr, clnph->src_len, true);
 }
 
 void print_header_segment(struct clnp_segment *seg)
 {
-	pr_info("Printing CLNP segmentation part:\n");
-	pr_info("Data unit ID: %d\n", ntohs(seg->id));
-	pr_info("Segment offset: %d\n", ntohs(seg->off));
-	pr_info("Total length: %d\n", ntohs(seg->tot_len));
+	print_func("Printing CLNP segmentation part:\n");
+	print_func("Data unit ID: %d\n", ntohs(seg->id));
+	print_func("Segment offset: %d\n", ntohs(seg->off));
+	print_func("Total length: %d\n", ntohs(seg->tot_len));
 }
 
 void print_header_options(struct clnp_options *opt)
 {
-	int i = 0;
-
-	pr_info("Printing an optional part of a CLNP header\n");
-	pr_info("Option parameter code: 0x%02X -> ", opt->code);
+	print_func("Printing an optional part of a CLNP header\n");
+	print_func("Option parameter code: 0x%02X -> ", opt->code);
 	switch (opt->code) {
 	case CLNPOPT_PC_PAD:
-		pr_info("padding\n");
+		print_func("padding\n");
 		break;
 	case CLNPOPT_PC_SEC:
-		pr_info("security\n");
+		print_func("security\n");
 		break;
 	case CLNPOPT_PC_SRCROUTE:
-		pr_info("source routing\n");
+		print_func("source routing\n");
 		break;
 	case CLNPOPT_PC_ROR:
-		pr_info("recording of route\n");
+		print_func("recording of route\n");
 		break;
 	case CLNPOPT_PC_QOS:
-		pr_info("quality of service\n");
+		print_func("quality of service\n");
 		break;
 	case CLNPOPT_PC_PRIOR:
-		pr_info("priority\n");
+		print_func("priority\n");
 		break;
 	case CLNPOPT_PC_PBSC:
-		pr_info("prefix based scope control\n");
+		print_func("prefix based scope control\n");
 		break;
 	case CLNPOPT_PC_RSC:
-		pr_info("radius scope control\n");
+		print_func("radius scope control\n");
 		break;
 	default:
-		pr_info("unknown\n");
+		print_func("unknown\n");
 	}
-	pr_info("Option parameter length: %d\n", opt->len);
-	for (i = 0; i < opt->len; i++)
-		pr_info("Option parameter value[%d]: 0x%02X\n", i, opt->value[i]);
+	print_func("Option parameter length: %d\n", opt->len);
+	print_hex_dump(KERN_ERR, "Option parameter:", DUMP_PREFIX_OFFSET, 16, 1,
+			opt->value, opt->len, true);
 }
 
 void print_data_hex(struct sk_buff *skb)
@@ -159,6 +156,10 @@ void print_data_hex(struct sk_buff *skb)
 	struct clnphdr *clnph = clnp_hdr(skb);
 	const int len = ntohs(clnph->seglen);
 
-	pr_info("Printing payload:\n");
-	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET, 16, 16, clnph + 1, len, 1);
+	print_hex_dump(KERN_ERR, "PAYLOAD:", DUMP_PREFIX_OFFSET, 16, 1, clnph + 1, len, 1);
+}
+
+void print_simple(const u8 *buf, const int len)
+{
+	print_hex_dump(KERN_ERR, "", DUMP_PREFIX_OFFSET, 32, 1, buf, len, 1);
 }
