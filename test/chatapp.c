@@ -202,8 +202,7 @@ static void print_hex_dump(const char *prefix_str, int prefix_type,
 
 		switch (prefix_type) {
 		case 1:
-			printf("%s%p: %s\n",
-				   prefix_str, ptr + i, linebuf);
+			printf("%s%p: %s\n", prefix_str, ptr + i, linebuf);
 			break;
 		case 2:
 			printf("%s%.8x: %s\n", prefix_str, i, linebuf);
@@ -230,8 +229,7 @@ static void print_hex_dump(const char *prefix_str, int prefix_type,
 static void print_hex_dump_bytes(const char *prefix_str, int prefix_type,
 			  const void *buf, size_t len)
 {
-	print_hex_dump(prefix_str, prefix_type, 16, 1,
-			   buf, len, 1);
+	print_hex_dump(prefix_str, prefix_type, 16, 1, buf, len, 1);
 }
 
 static void print_usage(const char *prog)
@@ -347,7 +345,7 @@ static int resolv_addr(const char* name, void* addr) {
 				atn->s_addr[i] = digit;
 			}
 			printf("resolving NSAP address '%s', got binary:\n", name);
-			print_hex_dump("NSAP in BIN:", 1, sizeof(atn->s_addr), 1, atn->s_addr, sizeof(atn->s_addr), 0);
+			//print_hex_dump("NSAP in BIN:", 1, sizeof(atn->s_addr), 1, atn->s_addr, sizeof(atn->s_addr), 0);
 			return 1;
 		} else {
 			return inet_aton(name, addr);
@@ -410,7 +408,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Bind the socket with the server address
-	if ( bind(sockfd, local_addr, sock_len) < 0 ) {
+	if (bind(sockfd, local_addr, sock_len) < 0) {
 		handle_error("bind failed");
 	}
 
