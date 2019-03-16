@@ -294,6 +294,7 @@ static int atn_bind(struct socket *sock, struct sockaddr *saddr, int saddr_len)
 	struct sockaddr_atn *addr = (struct sockaddr_atn *)saddr;
 	int rc = -EINVAL;
 
+	lock_sock(sk);
 	if (!sock_flag(sk, SOCK_ZAPPED) || saddr_len != sizeof(*addr)) {
 		pr_err("%s: could not bind socket, SOCK_ZAPPED=%d, addr_len=%d\n",
 			   __func__, sock_flag(sk, SOCK_ZAPPED), saddr_len);
@@ -322,6 +323,7 @@ static int atn_bind(struct socket *sock, struct sockaddr *saddr, int saddr_len)
 	rc = 0;
 
 out:
+	release_sock(sk);
 	return rc;
 }
 
@@ -334,6 +336,7 @@ static int atn_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int
 	int copied;
 	int rc;
 
+	lock_sock(sk);
 	rc = -ENOTCONN;
 	if (sock_flag(sk, SOCK_ZAPPED)) {
 		net_err_ratelimited("%s: socket not bind\n", __func__);
@@ -372,6 +375,7 @@ static int atn_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int
 out_free:
 	skb_free_datagram(sk, skb);
 out:
+	release_sock(sk);
 	return rc;
 }
 
@@ -385,6 +389,8 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 	struct sk_buff *skb = NULL;
 	struct net_device *dev;
 	int total_header_len = 0;
+
+	lock_sock(sk);
 
 	if (sock_flag(sk, SOCK_ZAPPED)) {
 		net_err_ratelimited("%s: socket not bind\n", __func__);
@@ -415,7 +421,9 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 	}
 
 	rc = -ENOMEM;
+	release_sock(sk);
 	skb = sock_alloc_send_skb(sk, NET_IP_ALIGN + total_header_len + len, flags & MSG_DONTWAIT, &rc);
+	lock_sock(sk);
 	if (!skb) {
 		net_err_ratelimited("%s: couldn't allocate skb, size %lu, error %d\n",
 							__func__, NET_IP_ALIGN + total_header_len + len, rc);
@@ -448,6 +456,7 @@ static int atn_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
 	}
 
 out:
+	release_sock(sk);
 	return rc;
 
 out_dev:
