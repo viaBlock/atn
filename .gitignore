@@ -9,6 +9,8 @@
 #
 # Normal rules (sorted alphabetically)
 #
+*.pcap
+*.log
 .*
 *.a
 *.bin
