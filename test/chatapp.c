@@ -31,7 +31,7 @@ const char hex_asc[] = "0123456789abcdef";
 
 static const char* local = NULL;
 static const char* remote = NULL;
-static int server;
+static int is_server;
 static int is_atn = 1;
 static int is_raw = 1;
 
@@ -39,8 +39,8 @@ static ssize_t msglen = MAXSIZE;
 static uint8_t msg[MAXSIZE];
 
 static void handle_error(const char* msg) {
-    perror(msg);
-    exit(EXIT_FAILURE);
+	perror(msg);
+	exit(EXIT_FAILURE);
 }
 
 static const uint8_t nsap_addr_prefix[] = { 47, 00, 27, 81, 47, 42, 52, 00, 00, 00, 00 };
@@ -183,8 +183,8 @@ nil:
  * ffffffff88089af0: 73727170 77767574 7b7a7978 7f7e7d7c  pqrstuvwxyz{|}~.
  */
 static void print_hex_dump(const char *prefix_str, int prefix_type,
-		    int rowsize, int groupsize,
-		    const void *buf, size_t len, int ascii)
+			int rowsize, int groupsize,
+			const void *buf, size_t len, int ascii)
 {
 	const uint8_t *ptr = buf;
 	int i, linelen, remaining = len;
@@ -203,7 +203,7 @@ static void print_hex_dump(const char *prefix_str, int prefix_type,
 		switch (prefix_type) {
 		case 1:
 			printf("%s%p: %s\n",
-			       prefix_str, ptr + i, linebuf);
+				   prefix_str, ptr + i, linebuf);
 			break;
 		case 2:
 			printf("%s%.8x: %s\n", prefix_str, i, linebuf);
@@ -231,34 +231,33 @@ static void print_hex_dump_bytes(const char *prefix_str, int prefix_type,
 			  const void *buf, size_t len)
 {
 	print_hex_dump(prefix_str, prefix_type, 16, 1,
-		       buf, len, 1);
+			   buf, len, 1);
 }
 
 static void print_usage(const char *prog)
 {
 	printf("Usage: %s [-sid] [-l addr] [-r addr] [-m len] [msg]\n", prog);
-	puts("  -s|--server  - start server\n"
-         "  -l|--local   - local address\n"
-         "  -r|--remote  - overwrite remote address\n"
-         "  -i|--inet    - use IPv4 stack instead of ATN\n"
-         "  -d|--dgram   - use DGRAM socket instead of RAW\n"
-         "  -m|--msglen  - use random date of specified len\n"
-         "  msg          - optional message to send, use full MTU if neither msg or msglen specified\n"
-    );
-	exit(EXIT_FAILURE);
+	handle_error("  -s|--server  - start server\n"
+		 "  -l|--local   - local address\n"
+		 "  -r|--remote  - overwrite remote address\n"
+		 "  -i|--inet    - use IPv4 stack instead of ATN\n"
+		 "  -d|--dgram   - use DGRAM socket instead of RAW\n"
+		 "  -m|--msglen  - use random date of specified len\n"
+		 "  msg          - optional message to send, use full MTU if neither msg or msglen specified\n"
+	);
 }
 
 static void parse_opts(int argc, char *argv[])
 {
 	while (1) {
-        int option_index = 0;
+		int option_index = 0;
 		static const struct option lopts[] = {
 			{ "server",  no_argument, 0, 0 },
-            { "local",   required_argument, 0, 0 },
-            { "remote",  required_argument, 0, 0 },
-            { "msglen",  required_argument, 0, 0 },
-            { "inet",    no_argument, 0, 0 },
-            { "dgram",   no_argument, 0, 0 },
+			{ "local",   required_argument, 0, 0 },
+			{ "remote",  required_argument, 0, 0 },
+			{ "msglen",  required_argument, 0, 0 },
+			{ "inet",    no_argument, 0, 0 },
+			{ "dgram",   no_argument, 0, 0 },
 			{ NULL, 0, 0, 0 },
 		};
 		int c;
@@ -270,7 +269,7 @@ static void parse_opts(int argc, char *argv[])
 
 		switch (c) {
 		case 's':
-			server = 1;
+			is_server = 1;
 			break;
 
 		case 'l':
@@ -281,169 +280,197 @@ static void parse_opts(int argc, char *argv[])
 			remote = strdup(optarg);
 			break;
 
-        case 'i':
-            is_atn = 0;
+		case 'i':
+			is_atn = 0;
 			break;
 
-        case 'd':
-            is_raw = 0;
+		case 'd':
+			is_raw = 0;
 			break;
 
-        case 'm':
-            msglen = atoi(optarg);
+		case 'm':
+			msglen = atoi(optarg);
 			break;
 		}
 	}
 
-    if (!server && !remote || server && !local) {
-        print_usage(argv[0]);
-    }
+	if (!is_server && !remote || is_server && !local) {
+		print_usage(argv[0]);
+	}
 
-    if ((optind + 1) == argc) {
-        msglen = min(sizeof(msg), strlen(argv[optind]));
-        memcpy(msg, argv[optind], msglen);
-    } else {
-        srand(PORT);
-        for (int i = 0; i < MAXSIZE; ++i) {
-            msg[i] = rand() % 256;
-        }
-    }
+	if ((optind + 1) == argc) {
+		msglen = min(sizeof(msg), strlen(argv[optind]));
+		memcpy(msg, argv[optind], msglen);
+	} else {
+		srand(PORT);
+		for (int i = 0; i < MAXSIZE; ++i) {
+			msg[i] = rand() % 256;
+		}
+	}
 }
 
 static int resolv_addr(const char* name, void* addr) {
-    if (addr && name) {
-        if (is_atn) {
+	if (addr && name) {
+		if (is_atn) {
 			int i;
-            struct atn_addr* atn = addr;
-			if (strlen(name) != NSAP_ADDR_LEN * 2 + 1)
-				handle_error("incorrect NSAP address, exiting");
-			if (strncmp(name, nsap_prefix, sizeof(nsap_prefix) - 1) != 0)
-				handle_error("couldn't resolve NSAP address, exiting");
+			struct atn_addr* atn = addr;
+			if (strlen(name) != NSAP_ADDR_LEN * 2 + 1) {
+				printf("NSAP address: %s\n", name);
+				handle_error("incorrect NSAP address, exiting\n");
+			}
+			if (strncmp(name, nsap_prefix, sizeof(nsap_prefix) - 1) != 0) {
+				printf("NSAP address: %s\n", name);
+				handle_error("couldn't resolve NSAP address, exiting\n");
+			}
 
-            memset(atn->s_addr, 0, sizeof(atn->s_addr));
+			memset(atn->s_addr, 0, sizeof(atn->s_addr));
 			memcpy(atn->s_addr, nsap_addr_prefix, sizeof(nsap_addr_prefix));
 			//resolve node address, last bytes are MAC address in fact
 			// first +1 is due to '+' in the address
 			for (i = sizeof(nsap_addr_prefix); i < NSAP_ADDR_LEN; ++i) {
-				atn->s_addr[i] = (name[i*2 + 1] << 8) | (name[i*2 + 1 + 1]);
+				uint8_t upper = tolower(name[i * 2 + 1]);
+				uint8_t lower = tolower(name[i * 2 + 1 + 1]);
+				if (!isxdigit(upper) || !isxdigit(lower)) {
+					printf("NSAP address: %s\n", name);
+					handle_error("bad NSAP address, exiting\n");
+				}
+				uint8_t digit = 0;
+				if (isdigit(upper))
+					digit |= upper - '0';
+				else
+					digit |= upper - 'a' + 10;
+				digit <<= 4;
+				if (isdigit(lower))
+					digit |= lower - '0';
+				else
+					digit |= lower - 'a' + 10;
+				atn->s_addr[i] = digit;
 			}
 			printf("resolving NSAP address '%s', got binary:\n", name);
 			print_hex_dump("NSAP in BIN:", 1, sizeof(atn->s_addr), 1, atn->s_addr, sizeof(atn->s_addr), 0);
 			return 1;
-        } else {
-            return inet_aton(name, addr);
-        }
-    }
+		} else {
+			return inet_aton(name, addr);
+		}
+	}
 
-    return 0;
+	return 0;
 }
 
 int main(int argc, char *argv[]) {
 	int sockfd;
 	struct sockaddr_atn local_addr_atn, remote_addr_atn;
-    struct sockaddr_in local_addr_in, remote_addr_in;
-    const socklen_t sock_len = is_atn ? sizeof(local_addr_atn) : sizeof(local_addr_in);
-    struct sockaddr* const local_addr = is_atn ? (struct sockaddr*)&local_addr_atn : (struct sockaddr*)&local_addr_in;
-    struct sockaddr* const remote_addr = is_atn ? (struct sockaddr*)&remote_addr_atn : (struct sockaddr*)&remote_addr_in;
+	struct sockaddr_in local_addr_in, remote_addr_in;
+	const socklen_t sock_len = is_atn ? sizeof(local_addr_atn) : sizeof(local_addr_in);
+	struct sockaddr* const local_addr = is_atn ? (struct sockaddr*)&local_addr_atn : (struct sockaddr*)&local_addr_in;
+	struct sockaddr* const remote_addr = is_atn ? (struct sockaddr*)&remote_addr_atn : (struct sockaddr*)&remote_addr_in;
 
-    parse_opts(argc, argv);
+	parse_opts(argc, argv);
 
-	// Creating socket file descriptor
-    sockfd = socket(is_atn ? AF_ATN : AF_INET, is_raw ? SOCK_RAW : SOCK_DGRAM, is_atn ? 0 : IPPROTO_ICMP);
-	if (sockfd < 0) {
-        handle_error("socket creation failed");
-	}
-
-    memset(local_addr, 0, sock_len);
-    memset(remote_addr, 0, sock_len);
+	memset(local_addr, 0, sock_len);
+	memset(remote_addr, 0, sock_len);
 
 	if (is_atn) {
-        // Filling server information
-        struct sockaddr_atn* addr = (struct sockaddr_atn*)local_addr;
+		// Filling server information
+		struct sockaddr_atn* addr = (struct sockaddr_atn*)local_addr;
 
-        addr->satn_family = AF_ATN;
-        resolv_addr(local, &addr->satn_addr);
-		memcpy(addr->satn_mac_addr, addr->satn_addr.s_addr + sizeof(nsap_addr_prefix) + 5, sizeof(addr->satn_mac_addr));
+		if (local) {
+			addr->satn_family = AF_ATN;
+			resolv_addr(local, &addr->satn_addr);
+			memcpy(addr->satn_mac_addr, addr->satn_addr.s_addr + NSAP_ADDR_LEN - ETH_ALEN, sizeof(addr->satn_mac_addr));
+		}
 
-        addr = (struct sockaddr_atn*)remote_addr;
-        addr->satn_family = AF_ATN;
-        resolv_addr(remote, &addr->satn_addr);
-		memcpy(addr->satn_mac_addr, addr->satn_addr.s_addr + sizeof(nsap_addr_prefix) + 5, sizeof(addr->satn_mac_addr));
-    } else {
-        struct sockaddr_in* addr = (struct sockaddr_in*)local_addr;
+		if (remote) {
+			addr = (struct sockaddr_atn*)remote_addr;
+			addr->satn_family = AF_ATN;
+			resolv_addr(remote, &addr->satn_addr);
+			memcpy(addr->satn_mac_addr, addr->satn_addr.s_addr + NSAP_ADDR_LEN - ETH_ALEN, sizeof(addr->satn_mac_addr));
+		}
+	} else {
+		struct sockaddr_in* addr = (struct sockaddr_in*)local_addr;
 
-        addr->sin_family = AF_INET; // IPv4
-        addr->sin_port = htons(PORT);
-        resolv_addr(local, &addr->sin_addr);
+		if (local) {
+			addr->sin_family = AF_INET; // IPv4
+			addr->sin_port = htons(is_server ? PORT : PORT - 1);
+			resolv_addr(local, &addr->sin_addr);
+		}
 
-        addr = (struct sockaddr_in*)remote_addr;
-        addr->sin_family = AF_INET; // IPv4
-        addr->sin_port = htons(PORT);
-        resolv_addr(remote, &addr->sin_addr);
-    }
+		if (remote) {
+			addr = (struct sockaddr_in*)remote_addr;
+			addr->sin_family = AF_INET; // IPv4
+			addr->sin_port = htons(is_server ? PORT -1 : PORT);
+			resolv_addr(remote, &addr->sin_addr);
+		}
+	}
 
-	if (server) {
-        // Bind the socket with the server address
-        if ( bind(sockfd, local_addr, sock_len) < 0 ) {
-            handle_error("bind failed");
-        }
+	// Creating socket file descriptor
+	sockfd = socket(is_atn ? AF_ATN : AF_INET, is_raw ? SOCK_RAW : SOCK_DGRAM, is_atn ? 0 : IPPROTO_ICMP);
+	if (sockfd < 0) {
+		handle_error("socket creation failed");
+	}
 
-        while(1) {
-            socklen_t remote_addr_len = sock_len;
-            ssize_t msg_size;
+	// Bind the socket with the server address
+	if ( bind(sockfd, local_addr, sock_len) < 0 ) {
+		handle_error("bind failed");
+	}
 
-            memset(msg, 0 , sizeof(msg));
+	if (is_server) {
+		while(1) {
+			socklen_t remote_addr_len = sock_len;
+			ssize_t msg_size;
 
-            msg_size = recvfrom(sockfd, msg, sizeof(msg), 0, remote_addr, &remote_addr_len);
-            if (msg_size < 0) {
-                handle_error("error from recvfrom");
-            }
-            printf("RECEIVED %ld bytes:\n", msg_size);
-            print_hex_dump_bytes("", 2, msg, msg_size);
+			memset(msg, 0 , sizeof(msg));
 
-            msg_size = sendto(sockfd, msg, msg_size, 0, remote_addr, remote_addr_len);
-            if (msg_size < 0) {
-                handle_error("error from sendto");
-            }
-            printf("SEND %ld bytes:\n", msg_size);
-        }
-    } else {
-        ssize_t msg_size;
-        uint8_t* msg_received;
+			msg_size = recvfrom(sockfd, msg, sizeof(msg), 0, remote_addr, &remote_addr_len);
+			if (msg_size < 0) {
+				handle_error("error from recvfrom");
+			}
+			printf("RECEIVED %ld bytes:\n", msg_size);
+			print_hex_dump_bytes("", 2, msg, msg_size);
 
-        msg_size = sendto(sockfd, msg, msglen, 0, remote_addr, sock_len);
-        if (msg_size < 0) {
-            handle_error("error from sendto");
-        } else if (msg_size != msglen) {
-            printf ("REQUESTED:%ld SENT:%ld\n", msglen, msg_size);
-            handle_error("NOT ALL DATA SENT");
-        }
-        printf("SEND %ld bytes:\n", msg_size);
-        print_hex_dump_bytes("", 2, msg, msg_size);
+			msg_size = sendto(sockfd, msg, msg_size, 0, remote_addr, remote_addr_len);
+			if (msg_size < 0) {
+				handle_error("error from sendto");
+			}
+			printf("SEND %ld bytes:\n", msg_size);
+		}
+	} else {
+		ssize_t msg_size;
+		uint8_t* msg_received;
 
-        msg_received = malloc(MAXSIZE);
-        if (!msg_received) {
-            handle_error("can't allocate memory for receive buffer");
-        }
+		msg_size = sendto(sockfd, msg, msglen, 0, remote_addr, sock_len);
+		if (msg_size < 0) {
+			handle_error("error from sendto");
+		} else if (msg_size != msglen) {
+			printf ("REQUESTED:%ld SENT:%ld\n", msglen, msg_size);
+			handle_error("NOT ALL DATA SENT");
+		}
+		printf("SEND %ld bytes:\n", msg_size);
+		print_hex_dump_bytes("", 2, msg, msg_size);
 
-        memset(msg_received, 0 , MAXSIZE);
+		msg_received = malloc(MAXSIZE);
+		if (!msg_received) {
+			handle_error("can't allocate memory for receive buffer");
+		}
 
-        msg_size = recv(sockfd, msg_received, msg_size, 0);
-        if (msg_size < 0) {
-            free(msg_received);
-            handle_error("error from recvfrom");
-        } else if (msg_size != msglen) {
-            free(msg_received);
-            printf ("SENT:%ld RECEIVED:%ld\n", msglen, msg_size);
-            handle_error("NOT ALL DATA RECEIVED");
-        } else if (memcmp(msg_received, msg, msg_size) != 0) {
-            printf("DATA MISMATCH BETWEEN SENT AND RECEIVED\n");
-            print_hex_dump_bytes("", 2, msg_received, msg_size);
-            handle_error("");
-        }
-        printf("RECEIVED %ld bytes:\n", msg_size);
-        print_hex_dump_bytes("", 2, msg, msg_size);
-    }
+		memset(msg_received, 0 , MAXSIZE);
+
+		msg_size = recv(sockfd, msg_received, msg_size, 0);
+		if (msg_size < 0) {
+			free(msg_received);
+			handle_error("error from recvfrom");
+		} else if (msg_size != msglen) {
+			free(msg_received);
+			printf ("SENT:%ld RECEIVED:%ld\n", msglen, msg_size);
+			handle_error("NOT ALL DATA RECEIVED");
+		} else if (memcmp(msg_received, msg, msg_size) != 0) {
+			printf("DATA MISMATCH BETWEEN SENT AND RECEIVED\n");
+			print_hex_dump_bytes("", 2, msg_received, msg_size);
+			handle_error("");
+		}
+		printf("RECEIVED %ld bytes:\n", msg_size);
+		print_hex_dump_bytes("", 2, msg, msg_size);
+	}
 
 	return 0;
 }
