@@ -34,6 +34,7 @@ static const char* remote = NULL;
 static int is_server;
 static int is_atn = 1;
 static int is_raw = 1;
+static int is_debug = 0;
 
 static ssize_t msglen = MAXSIZE;
 static uint8_t msg[MAXSIZE];
@@ -234,12 +235,13 @@ static void print_hex_dump_bytes(const char *prefix_str, int prefix_type,
 
 static void print_usage(const char *prog)
 {
-	printf("Usage: %s [-sid] [-l addr] [-r addr] [-m len] [msg]\n", prog);
+	printf("Usage: %s [-sidv] [-l addr] [-r addr] [-m len] [msg]\n", prog);
 	handle_error("  -s|--server  - start server\n"
 		 "  -l|--local   - local address\n"
 		 "  -r|--remote  - overwrite remote address\n"
 		 "  -i|--inet    - use IPv4 stack instead of ATN\n"
 		 "  -d|--dgram   - use DGRAM socket instead of RAW\n"
+		 "  -v|--verbose - be verbose about data sent and received\n"
 		 "  -m|--msglen  - use random date of specified len\n"
 		 "  msg          - optional message to send, use full MTU if neither msg or msglen specified\n"
 	);
@@ -256,11 +258,12 @@ static void parse_opts(int argc, char *argv[])
 			{ "msglen",  required_argument, 0, 0 },
 			{ "inet",    no_argument, 0, 0 },
 			{ "dgram",   no_argument, 0, 0 },
+			{ "verbose",   no_argument, 0, 0 },
 			{ NULL, 0, 0, 0 },
 		};
 		int c;
 
-		c = getopt_long(argc, argv, "sl:r:m:id", lopts, &option_index);
+		c = getopt_long(argc, argv, "sl:r:m:idv", lopts, &option_index);
 
 		if (c == -1)
 			break;
@@ -284,6 +287,10 @@ static void parse_opts(int argc, char *argv[])
 
 		case 'd':
 			is_raw = 0;
+			break;
+
+		case 'v':
+			is_debug = 1;
 			break;
 
 		case 'm':
@@ -424,13 +431,16 @@ int main(int argc, char *argv[]) {
 				handle_error("error from recvfrom");
 			}
 			printf("RECEIVED %ld bytes:\n", msg_size);
-			print_hex_dump_bytes("", 2, msg, msg_size);
+			if (is_debug)
+				print_hex_dump_bytes("", 2, msg, msg_size);
 
 			msg_size = sendto(sockfd, msg, msg_size, 0, remote_addr, remote_addr_len);
 			if (msg_size < 0) {
 				handle_error("error from sendto");
 			}
 			printf("SEND %ld bytes:\n", msg_size);
+			if (is_debug)
+				print_hex_dump_bytes("", 2, msg, msg_size);
 		}
 	} else {
 		ssize_t msg_size;
@@ -444,7 +454,8 @@ int main(int argc, char *argv[]) {
 			handle_error("NOT ALL DATA SENT");
 		}
 		printf("SEND %ld bytes:\n", msg_size);
-		print_hex_dump_bytes("", 2, msg, msg_size);
+		if (is_debug)
+			print_hex_dump_bytes("", 2, msg, msg_size);
 
 		msg_received = malloc(MAXSIZE);
 		if (!msg_received) {
@@ -467,7 +478,8 @@ int main(int argc, char *argv[]) {
 			handle_error("");
 		}
 		printf("RECEIVED %ld bytes:\n", msg_size);
-		print_hex_dump_bytes("", 2, msg, msg_size);
+		if (is_debug)
+			print_hex_dump_bytes("", 2, msg, msg_size);
 	}
 
 	return 0;
