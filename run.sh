@@ -1,4 +1,4 @@
-#! /bin/sh -ex
+#! /bin/sh -e
 
 export VBOXMANAGE=vboxmanage
 
@@ -90,6 +90,14 @@ sleep 3
 
 echo run client test
 guest_run $VM2 $ATN_PATH "$ATN_PATH/test/chatapp -l $VM2_NSAP_ADDR -r $VM1_NSAP_ADDR 0123456789"
+
+guest_run $VM2 $ATN_PATH "$ATN_PATH/test/chatapp -l $VM2_NSAP_ADDR -r $VM1_NSAP_ADDR 9876543210"
+
+guest_run $VM2 $ATN_PATH "$ATN_PATH/test/chatapp -l $VM2_NSAP_ADDR -r $VM1_NSAP_ADDR -m 256"
+
+guest_run $VM2 $ATN_PATH "$ATN_PATH/test/chatapp -l $VM2_NSAP_ADDR -r $VM1_NSAP_ADDR -m 512"
+
+guest_run $VM2 $ATN_PATH "$ATN_PATH/test/chatapp -l $VM2_NSAP_ADDR -r $VM1_NSAP_ADDR -m 1024"
 
 #guest_start $VM1 . /usr/bin/sudo /sbin/shutdown now
 #guest_start $VM2 . /usr/bin/sudo /sbin/shutdown now
