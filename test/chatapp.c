@@ -351,7 +351,7 @@ static int resolv_addr(const char* name, void* addr) {
 					digit |= lower - 'a' + 10;
 				atn->s_addr[i] = digit;
 			}
-			printf("resolving NSAP address '%s', got binary:\n", name);
+			//printf("resolving NSAP address '%s', got binary:\n", name);
 			//print_hex_dump("NSAP in BIN:", 1, sizeof(atn->s_addr), 1, atn->s_addr, sizeof(atn->s_addr), 0);
 			return 1;
 		} else {
