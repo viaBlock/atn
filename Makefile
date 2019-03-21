@@ -19,4 +19,4 @@ modules_install: modules
 clean:
 	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) clean
 	$(MAKE) -C test clean
-	@rm -f Module.symvers *.o .*.cmd *.mod.c *.ko
+	@rm -f Module.symvers *.o .*.cmd *.mod.c *.ko *.pcap *.log
