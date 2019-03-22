@@ -100,7 +100,7 @@ if [ "${IS_SERVER}" == "1" ] ; then
 fi
 
 if [ `pgrep -c tcpdump` == "0" ] ; then
-sudo /usr/sbin/tcpdump -U -q -e -i $IF_NAME -nN -vvv -w ${NAME_PAT}.pcap &
+sudo /usr/sbin/tcpdump -U -q -e -i $IF_NAME -nN -vvv -w ${NAME_PAT}.pcap clnp &
 fi
 sleep 3
 
