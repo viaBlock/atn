@@ -35,7 +35,7 @@ while getopts "sbl:r:n" o; do
             REMOTE_ADDR=${OPTARG}
             if echo $REMOTE_ADDR | grep -v $NSAP_PREFIX ; then
                 REMOTE_HOST=$REMOTE_ADDR
-                ETHER_MAC=`arping -f ip-172-31-0-233 | grep "Unicast reply from" | cut -d ' ' -f 5 | tr -d '[]:'`
+                ETHER_MAC=`arping -f $REMOTE_HOST | grep "Unicast reply from" | cut -d ' ' -f 5 | tr -d '[]:'`
                 REMOTE_ADDR=`printf "%s%06d%s" $NSAP_PREFIX 0 $ETHER_MAC`
             fi
 
