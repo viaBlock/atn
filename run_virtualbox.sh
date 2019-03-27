@@ -65,7 +65,7 @@ echo start server
 set +e
 $VBOXMANAGE guestcontrol $VM1 closesession --all
 set -e
-guest_start $VM1 $ATN_PATH "$ATN_PATH/run_test.sh -s -b -l enp0s8 &"
+guest_start $VM1 $ATN_PATH "$ATN_PATH/run_test.sh -s -l enp0s8 &"
 
 sleep 10
 
