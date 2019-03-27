@@ -53,7 +53,7 @@ fi
 ATN_PATH=/home/test/atn/src
 
 echo test
-VM1_MAC=`get_vm_state_data $VM1 'Attachment: Internal Network' | grep -oE 'MAC: [0-9a-fA-F]+' | cut -d ' ' -f 2 | tr 'a-z' 'a-Z'`
+VM1_MAC=`get_vm_state_data $VM1 'Attachment: Internal Network' | grep -oE 'MAC: [0-9a-fA-F]+' | cut -d ' ' -f 2 | tr 'a-z' 'A-Z'`
 VM2_MAC=`get_vm_state_data $VM2 'Attachment: Internal Network' | grep -oE 'MAC: [0-9a-fA-F]+' | cut -d ' ' -f 2`
 
 NSAP_PREFIX="470027+8147425200000000"
