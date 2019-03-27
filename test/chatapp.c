@@ -44,9 +44,6 @@ static void handle_error(const char* msg) {
 	exit(EXIT_FAILURE);
 }
 
-static const uint8_t nsap_addr_prefix[] = { 47, 00, 27, 81, 47, 42, 52, 00, 00, 00, 00 };
-static const char nsap_prefix[] = "470027+8147425200000000";
-
 /**
  * hex_dump_to_buffer - convert a blob of data to "hex ASCII" in memory
  * @buf: data blob to dump
@@ -319,24 +316,32 @@ static int resolv_addr(const char* name, void* addr) {
 		if (is_atn) {
 			int i;
 			struct atn_addr* atn = addr;
-			if (strlen(name) != NSAP_ADDR_LEN * 2 + 1) {
+			int has_plus = 0;
+			const char *name_norm = name;
+			const int plus_index = 6;
+
+			if (name[plus_index] == '+')
+				has_plus = 1;
+
+			if (strlen(name) != NSAP_ADDR_LEN * 2 + has_plus) {
 				printf("NSAP address: %s\n", name);
 				handle_error("incorrect NSAP address, exiting\n");
 			}
-			if (strncmp(name, nsap_prefix, sizeof(nsap_prefix) - 1) != 0) {
-				printf("NSAP address: %s\n", name);
-				handle_error("couldn't resolve NSAP address, exiting\n");
+
+			if (has_plus) {
+				char* tmp = alloca(NSAP_ADDR_LEN * 2 + 1);
+				memcpy(tmp, name, plus_index);
+				memcpy(tmp + plus_index, name + plus_index + 1, NSAP_ADDR_LEN * 2 - plus_index + 1);
+				name_norm = tmp;
 			}
 
 			memset(atn->s_addr, 0, sizeof(atn->s_addr));
-			memcpy(atn->s_addr, nsap_addr_prefix, sizeof(nsap_addr_prefix));
 			//resolve node address, last bytes are MAC address in fact
-			// first +1 is due to '+' in the address
-			for (i = sizeof(nsap_addr_prefix); i < NSAP_ADDR_LEN; ++i) {
-				uint8_t upper = tolower(name[i * 2 + 1]);
-				uint8_t lower = tolower(name[i * 2 + 1 + 1]);
+			for (i = 0; i < NSAP_ADDR_LEN; ++i) {
+				uint8_t upper = tolower(name_norm[i * 2]);
+				uint8_t lower = tolower(name_norm[i * 2 + 1]);
 				if (!isxdigit(upper) || !isxdigit(lower)) {
-					printf("NSAP address: %s\n", name);
+					printf("NSAP address: %s\n", name_norm);
 					handle_error("bad NSAP address, exiting\n");
 				}
 				uint8_t digit = 0;
