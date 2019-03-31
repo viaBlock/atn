@@ -65,12 +65,12 @@ echo start server
 set +e
 $VBOXMANAGE guestcontrol $VM1 closesession --all
 set -e
-guest_start $VM1 $ATN_PATH "$ATN_PATH/run_test.sh -s -l enp0s8 &"
+guest_start $VM1 $ATN_PATH "$ATN_PATH/run_test.sh -t -s -l enp0s8 &"
 
 sleep 10
 
 echo run client test
-guest_run $VM2 $ATN_PATH "$ATN_PATH/run_test.sh -n -l enp0s8 -r $VM1_NSAP_ADDR 0123456789 9876543210"
+guest_run $VM2 $ATN_PATH "$ATN_PATH/run_test.sh -t -n -l enp0s8 -r $VM1_NSAP_ADDR 0123456789 9876543210"
 
 sleep 1
 guest_run $VM1 $ATN_PATH "/usr/bin/sudo killall chatapp"

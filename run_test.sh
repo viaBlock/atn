@@ -2,7 +2,7 @@
 
 cd "${BASH_SOURCE%/*}/" || exit 1
 
-usage() { echo "Usage: `basename $0` [-s] [-n] -l <NSAP local> [-r <NSAP remote>] msg1 [msg2...]" 1>&2; exit 1; }
+usage() { echo "Usage: `basename $0` [-s|-c] [-t] [-n] -l <NSAP local> [-r <NSAP remote>] msg1 [msg2...]" 1>&2; exit 1; }
 
 NSAP_PREFIX="4700278147425200000000"
 
@@ -11,14 +11,21 @@ IS_SERVER=0
 LOCAL_ADDR=
 REMOTE_ADDR=
 NO_PREPARE=0
+TCPDUMP=0
 
-while getopts "sl:r:n" o; do
+while getopts "scl:r:nt" o; do
     case "${o}" in
         n)
             NO_PREPARE=1
             ;;
         s)
             IS_SERVER=1
+            ;;
+        c)
+            IS_SERVER=0
+            ;;
+        t)
+            TCPDUMP=1
             ;;
         l)
             LOCAL_ADDR=${OPTARG}
@@ -68,7 +75,9 @@ if /sbin/ifconfig $IF_NAME | grep $IF_NAME | grep -qv UP ; then
     sudo -E /sbin/ifconfig $IF_NAME up
 fi
 sudo -E dmesg -n 8
-if [ "`pgrep -c tcpdump`" != "0" ] ; then
+
+
+if [ "`pgrep -c tcpdump`" != "0" -a "$TCPDUMP" == "1" ] ; then
     sudo -E killall -q -9 tcpdump
 fi
 
@@ -100,10 +109,10 @@ if [ "${IS_SERVER}" == "1" ] ; then
     sudo rm -f ${NAME_PAT}.pcap
 fi
 
-if [ `pgrep -c tcpdump` == "0" ] ; then
-    sudo /usr/sbin/tcpdump -U -q -e -i $IF_NAME -nN -vvv -w ${NAME_PAT}.pcap clnp &
+if [ `pgrep -c tcpdump` == "0" -a "$TCPDUMP" == "1" ] ; then
+    sudo /usr/sbin/tcpdump -U -e -i $IF_NAME -nN -vvv -w ${NAME_PAT}.pcap clnp 2>&1 >/dev/null &
+    sleep 3
 fi
-sleep 3
 
 if [ "${IS_SERVER}" == "0" ] ; then
     for msg in $@ ; do
