@@ -4,7 +4,7 @@ cd "${BASH_SOURCE%/*}/" || exit 1
 
 usage() { echo "Usage: `basename $0` [-s|-c] [-t] [-n] -l <NSAP local> [-r <NSAP remote>] msg1 [msg2...]" 1>&2; exit 1; }
 
-NSAP_PREFIX="4700278147425200000000"
+NSAP_PREFIX="FA0000000000000000AAAA"
 
 IF_NAME=enp0s8
 IS_SERVER=0
